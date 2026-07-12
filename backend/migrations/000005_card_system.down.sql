@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS card_progress;
+DROP TABLE IF EXISTS textbook_chunks;
+DROP TABLE IF EXISTS cards;
+DROP TABLE IF EXISTS card_tasks;

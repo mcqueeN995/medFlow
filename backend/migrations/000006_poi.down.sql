@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS poi_campus_links;
+DROP TABLE IF EXISTS poi;

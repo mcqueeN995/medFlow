@@ -1,0 +1,14 @@
+DROP TYPE IF EXISTS notification_type;
+DROP TYPE IF EXISTS audit_action;
+DROP TYPE IF EXISTS reaction_target_type;
+DROP TYPE IF EXISTS subscription_target_type;
+DROP TYPE IF EXISTS report_status;
+DROP TYPE IF EXISTS thread_tag;
+DROP TYPE IF EXISTS poi_type;
+DROP TYPE IF EXISTS card_difficulty;
+DROP TYPE IF EXISTS card_task_source_type;
+DROP TYPE IF EXISTS card_task_status;
+DROP TYPE IF EXISTS textbook_license_type;
+DROP TYPE IF EXISTS textbook_storage_type;
+DROP TYPE IF EXISTS university;
+DROP TYPE IF EXISTS user_role;
