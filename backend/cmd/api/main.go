@@ -20,7 +20,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := server.New(cfg)
+	srv, err := server.New(cfg)
+	if err != nil {
+		slog.Error("failed to create server", "error", err)
+		os.Exit(1)
+	}
+
 	if err := srv.Run(); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)

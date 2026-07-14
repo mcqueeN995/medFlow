@@ -10,40 +10,37 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/medflow/backend/internal/config"
-	"github.com/medflow/backend/internal/middleware"
+	"github.com/medflow/backend/internal/database"
+	"github.com/medflow/backend/internal/handler"
+	"github.com/medflow/backend/internal/repository"
+	"github.com/medflow/backend/internal/service"
 )
 
 type Server struct {
 	cfg    *config.Config
-	router *gin.Engine
 	http   *http.Server
+	pool   *pgxpool.Pool
+	router http.Handler
 }
 
-// New создает новый сервер
-func New(cfg *config.Config) *Server {
-	// Настраиваем Gin
-	if cfg.App.Env == "production" {
-		gin.SetMode(gin.ReleaseMode)
-	} else {
-		gin.SetMode(gin.DebugMode)
+func New(cfg *config.Config) (*Server, error) {
+	pool, err := database.NewPostgres(cfg.Database)
+	if err != nil {
+		return nil, fmt.Errorf("connect to database: %w", err)
 	}
+	slog.Info("connected to postgres")
 
-	router := gin.New()
+	userRepo := repository.NewUserRepo(pool)
+	tokenRepo := repository.NewTokenRepo(pool)
 
-	router.Use(middleware.RequestID())
-	router.Use(middleware.Logger())
-	router.Use(middleware.Recovery())
-	router.Use(middleware.CORS(middleware.DefaultCORSConfig()))
-	router.Use(middleware.RateLimiter(middleware.DefaultRateLimiterConfig()))
+	tokenService := service.NewTokenService(cfg)
+	authService := service.NewAuthService(userRepo, tokenRepo, tokenService, cfg)
 
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status": "ok",
-			"time":   time.Now().Format(time.RFC3339),
-		})
-	})
+	authHandler := handler.NewAuthHandler(authService)
+
+	router := SetupRouter(cfg, authHandler)
 
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.App.Port),
@@ -55,14 +52,13 @@ func New(cfg *config.Config) *Server {
 
 	return &Server{
 		cfg:    cfg,
-		router: router,
 		http:   httpServer,
-	}
+		pool:   pool,
+		router: router,
+	}, nil
 }
 
-// Run запускает сервер с graceful shutdown
 func (s *Server) Run() error {
-	// Канал для сигналов ОС
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
@@ -71,25 +67,25 @@ func (s *Server) Run() error {
 			"port", s.cfg.App.Port,
 			"env", s.cfg.App.Env,
 		)
-
 		if err := s.http.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
 			os.Exit(1)
 		}
 	}()
 
-	// Ждем сигнал завершения
 	<-quit
 	slog.Info("shutting down server...")
 
-	// Graceful shutdown с таймаутом 30 секунд
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := s.http.Shutdown(ctx); err != nil {
-		return fmt.Errorf("server shutdown failed: %w", err)
+		slog.Error("http shutdown error", "error", err)
 	}
 
+	// Закрываем пул БД
+	s.pool.Close()
 	slog.Info("server stopped gracefully")
+
 	return nil
 }
