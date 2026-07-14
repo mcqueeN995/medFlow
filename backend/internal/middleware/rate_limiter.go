@@ -72,7 +72,7 @@ func (rl *ipRateLimiter) addVisitor(ip string) *rate.Limiter {
 	return limiter
 }
 
-// cleanup удаляет старые записи (старше 3 минут)
+// cleanup удаляет старые записи
 func (rl *ipRateLimiter) cleanup() {
 	for {
 		time.Sleep(time.Minute)
@@ -87,9 +87,6 @@ func (rl *ipRateLimiter) cleanup() {
 	}
 }
 
-// Глобальный rate limiter
-var limiter = newIPRateLimiter(100, 20)
-
 // RateLimiter ограничивает количество запросов с одного IP
 func RateLimiter(config RateLimiterConfig) gin.HandlerFunc {
 	// Создаем отдельный limiter для этой конфигурации
@@ -101,7 +98,10 @@ func RateLimiter(config RateLimiterConfig) gin.HandlerFunc {
 
 		if !l.Allow() {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
-				"error": "rate limit exceeded",
+				"error": map[string]interface{}{
+					"code":    "RATE_LIMITED",
+					"message": "too many requests, please try again later",
+				},
 			})
 			return
 		}

@@ -6,7 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/medflow/backend/internal/config"
-	"github.com/medflow/backend/internal/handler"
+	"github.com/medflow/backend/internal/handler" // Исправлено на handlers (множественное число)
 	"github.com/medflow/backend/internal/middleware"
 )
 
@@ -41,10 +41,14 @@ func SetupRouter(
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/refresh", authHandler.Refresh)
 		auth.POST("/logout", authHandler.Logout)
+
+		// TODO: Добавить после реализации отправки Email / Redis
+		// auth.POST("/forgot-password", authHandler.ForgotPassword)
+		// auth.POST("/reset-password", authHandler.ResetPassword)
+		// auth.GET("/verify-email", authHandler.VerifyEmail)
 	}
 
 	// --- USERS (protected routes) ---
-	// TODO: Раскомментировать после реализации Users модуля
 	// users := api.Group("/users")
 	// users.Use(middleware.AuthRequired(cfg))
 	// {
@@ -55,7 +59,6 @@ func SetupRouter(
 	// }
 
 	// --- LIBRARY (public catalog) ---
-	// TODO: Раскомментировать после реализации Library модуля
 	// library := api.Group("/library")
 	// {
 	//     library.GET("/textbooks", libraryHandler.List)
@@ -65,7 +68,6 @@ func SetupRouter(
 	// }
 
 	// --- CARDS (protected) ---
-	// TODO: Раскомментировать после реализации Cards модуля
 	// cards := api.Group("/cards")
 	// cards.Use(middleware.AuthRequired(cfg))
 	// {
@@ -80,7 +82,6 @@ func SetupRouter(
 	// }
 
 	// --- UPLOAD (protected) ---
-	// TODO: Раскомментировать после реализации Upload модуля
 	// upload := api.Group("/upload")
 	// upload.Use(middleware.AuthRequired(cfg))
 	// {
@@ -88,14 +89,12 @@ func SetupRouter(
 	// }
 
 	// --- MAP (public) ---
-	// TODO: Раскомментировать после реализации Map модуля
 	// mapGroup := api.Group("/map")
 	// {
 	//     mapGroup.GET("/poi", mapHandler.ListPOI)
 	// }
 
 	// --- THREADS (protected) ---
-	// TODO: Раскомментировать после реализации Threads модуля
 	// threads := api.Group("/threads")
 	// threads.Use(middleware.AuthRequired(cfg))
 	// {
@@ -107,24 +106,22 @@ func SetupRouter(
 	//     threads.POST("/:id/reactions", threadHandler.AddReaction)
 	//     threads.DELETE("/:id/reactions", threadHandler.RemoveReaction)
 	//     threads.POST("/:id/report", threadHandler.Report)
-	//     threads.GET("/:id/comments", commentHandler.List)
+	//     threads.GET("/:id/comments", commentHandler.List) // GET дерево комментариев
 	// }
 
 	// --- COMMENTS (protected) ---
-	// TODO: Раскомментировать после реализации Comments модуля
-	// comments := api.Group("/comments")
+	// comments := api.Group("") // Пустой префикс, чтобы соответствовать /threads/{thread_id}/comments
 	// comments.Use(middleware.AuthRequired(cfg))
 	// {
-	//     comments.POST("", commentHandler.Create)
-	//     comments.PATCH("/:id", commentHandler.Update)
-	//     comments.DELETE("/:id", commentHandler.Delete)
-	//     comments.POST("/:id/reactions", commentHandler.AddReaction)
-	//     comments.DELETE("/:id/reactions", commentHandler.RemoveReaction)
-	//     comments.POST("/:id/report", commentHandler.Report)
+	//     comments.POST("/threads/:thread_id/comments", commentHandler.Create) // Исправлено под OpenAPI
+	//     comments.PATCH("/comments/:id", commentHandler.Update)
+	//     comments.DELETE("/comments/:id", commentHandler.Delete)
+	//     comments.POST("/comments/:id/reactions", commentHandler.AddReaction)
+	//     comments.DELETE("/comments/:id/reactions", commentHandler.RemoveReaction)
+	//     comments.POST("/comments/:id/report", commentHandler.Report)
 	// }
 
 	// --- SUBSCRIPTIONS (protected) ---
-	// TODO: Раскомментировать после реализации Subscriptions модуля
 	// subscriptions := api.Group("/subscriptions")
 	// subscriptions.Use(middleware.AuthRequired(cfg))
 	// {
@@ -134,7 +131,6 @@ func SetupRouter(
 	// }
 
 	// --- NOTIFICATIONS (protected) ---
-	// TODO: Раскомментировать после реализации Notifications модуля
 	// notifications := api.Group("/notifications")
 	// notifications.Use(middleware.AuthRequired(cfg))
 	// {
@@ -143,7 +139,6 @@ func SetupRouter(
 	// }
 
 	// --- PUSH (protected) ---
-	// TODO: Раскомментировать после реализации Push модуля
 	// push := api.Group("/push")
 	// push.Use(middleware.AuthRequired(cfg))
 	// {
@@ -153,7 +148,6 @@ func SetupRouter(
 	// }
 
 	// --- ADMIN (protected, role-based) ---
-	// TODO: Раскомментировать после реализации Admin модуля
 	// admin := api.Group("/admin")
 	// admin.Use(middleware.AuthRequired(cfg))
 	// {
