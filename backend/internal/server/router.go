@@ -13,6 +13,8 @@ import (
 func SetupRouter(
 	cfg *config.Config,
 	authHandler *handler.AuthHandler,
+	forumHandler *handler.ForumHandler,
+	userHandler *handler.UserHandler,
 ) *gin.Engine {
 	if cfg.App.Env == "production" {
 		gin.SetMode(gin.ReleaseMode)
@@ -48,15 +50,15 @@ func SetupRouter(
 		// auth.GET("/verify-email", authHandler.VerifyEmail)
 	}
 
-	// --- USERS (protected routes) ---
-	// users := api.Group("/users")
-	// users.Use(middleware.AuthRequired(cfg))
-	// {
-	//     users.GET("/me", userHandler.Me)
-	//     users.PATCH("/me", userHandler.Update)
-	//     users.DELETE("/me", userHandler.Delete)
-	//     users.GET("/:id", userHandler.PublicProfile)
-	// }
+	// --- USERS (protected - ни один /users-эндпоинт не имеет security: [] в openapi.yaml) ---
+	users := api.Group("/users")
+	users.Use(middleware.AuthRequired(cfg))
+	{
+		users.GET("/me", userHandler.Me)
+		users.PATCH("/me", userHandler.UpdateMe)
+		users.DELETE("/me", userHandler.DeleteMe)
+		users.GET("/:id", userHandler.PublicProfile)
+	}
 
 	// --- LIBRARY (public catalog) ---
 	// library := api.Group("/library")
@@ -94,32 +96,37 @@ func SetupRouter(
 	//     mapGroup.GET("/poi", mapHandler.ListPOI)
 	// }
 
-	// --- THREADS (protected) ---
-	// threads := api.Group("/threads")
-	// threads.Use(middleware.AuthRequired(cfg))
-	// {
-	//     threads.GET("", threadHandler.List)
-	//     threads.POST("", threadHandler.Create)
-	//     threads.GET("/:id", threadHandler.Get)
-	//     threads.PATCH("/:id", threadHandler.Update)
-	//     threads.DELETE("/:id", threadHandler.Delete)
-	//     threads.POST("/:id/reactions", threadHandler.AddReaction)
-	//     threads.DELETE("/:id/reactions", threadHandler.RemoveReaction)
-	//     threads.POST("/:id/report", threadHandler.Report)
-	//     threads.GET("/:id/comments", commentHandler.List) // GET дерево комментариев
-	// }
+	// --- THREADS (protected - весь форум требует входа, security: [] нигде
+	// не переопределён в openapi.yaml, в отличие от Library/Map) ---
+	threads := api.Group("/threads")
+	threads.Use(middleware.AuthRequired(cfg))
+	{
+		threads.GET("", forumHandler.ListThreads)
+		threads.POST("", forumHandler.CreateThread)
+		threads.GET("/:id", forumHandler.GetThread)
+		threads.PATCH("/:id", forumHandler.UpdateThread)
+		threads.DELETE("/:id", forumHandler.DeleteThread)
+		threads.POST("/:id/reactions", forumHandler.AddThreadReaction)
+		threads.DELETE("/:id/reactions", forumHandler.RemoveThreadReaction)
+		threads.POST("/:id/report", forumHandler.ReportThread)
+		// POST /:id/comments и GET/POST/PATCH/DELETE /:id/... должны использовать
+		// одно и то же имя параметра - gin паникует, если для одного HTTP-метода
+		// один и тот же узел дерева маршрутов регистрируется с разными именами
+		// wildcard'ов (тут было бы :id vs :thread_id на одной позиции для POST).
+		threads.GET("/:id/comments", forumHandler.ListComments)
+		threads.POST("/:id/comments", forumHandler.CreateComment)
+	}
 
 	// --- COMMENTS (protected) ---
-	// comments := api.Group("") // Пустой префикс, чтобы соответствовать /threads/{thread_id}/comments
-	// comments.Use(middleware.AuthRequired(cfg))
-	// {
-	//     comments.POST("/threads/:thread_id/comments", commentHandler.Create) // Исправлено под OpenAPI
-	//     comments.PATCH("/comments/:id", commentHandler.Update)
-	//     comments.DELETE("/comments/:id", commentHandler.Delete)
-	//     comments.POST("/comments/:id/reactions", commentHandler.AddReaction)
-	//     comments.DELETE("/comments/:id/reactions", commentHandler.RemoveReaction)
-	//     comments.POST("/comments/:id/report", commentHandler.Report)
-	// }
+	comments := api.Group("/comments")
+	comments.Use(middleware.AuthRequired(cfg))
+	{
+		comments.PATCH("/:id", forumHandler.UpdateComment)
+		comments.DELETE("/:id", forumHandler.DeleteComment)
+		comments.POST("/:id/reactions", forumHandler.AddCommentReaction)
+		comments.DELETE("/:id/reactions", forumHandler.RemoveCommentReaction)
+		comments.POST("/:id/report", forumHandler.ReportComment)
+	}
 
 	// --- SUBSCRIPTIONS (protected) ---
 	// subscriptions := api.Group("/subscriptions")

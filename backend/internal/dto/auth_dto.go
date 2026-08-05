@@ -54,6 +54,13 @@ type UserProfile struct {
 	CreatedAt       time.Time          `json:"created_at"`
 }
 
+type UpdateProfileRequest struct {
+	Nickname   *string            `json:"nickname,omitempty" binding:"omitempty,min=3,max=50"`
+	University *models.University `json:"university,omitempty"`
+	Course     *int               `json:"course,omitempty" binding:"omitempty,min=1,max=7"`
+	Faculty    *string            `json:"faculty,omitempty" binding:"omitempty,max=100"`
+}
+
 func ToUserProfile(user *models.User) UserProfile {
 	return UserProfile{
 		ID:              user.ID.String(),

@@ -54,6 +54,18 @@ func (m *mockUserRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.User
 	return nil, models.ErrUserNotFound
 }
 
+func (m *mockUserRepo) Update(ctx context.Context, id uuid.UUID, nickname string, university *models.University, course *int, faculty *string) (*models.User, error) {
+	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	return nil
+}
+
+func (m *mockUserRepo) FindPublicByID(ctx context.Context, id uuid.UUID) (*models.PublicUser, error) {
+	return nil, models.ErrUserNotFound
+}
+
 type mockTokenRepo struct {
 	saveFn           func(ctx context.Context, token *models.RefreshToken) error
 	findByHashFn     func(ctx context.Context, hash string) (*models.RefreshToken, error)

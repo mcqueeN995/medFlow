@@ -57,6 +57,21 @@ services:
       timeout: 5s
       retries: 5
 
+  # Разово создаёт бакет для PDF/обложек, чтобы первый же аплоад не падал
+  # с "bucket does not exist" на чистом окружении.
+  minio-init:
+    image: minio/mc:latest
+    container_name: medflow_minio_init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command: >
+      "mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin} &&
+       mc mb -p local/${S3_BUCKET_NAME:-medflow-assets}"
+    networks:
+      - medflow-network
+
   mailhog:
     image: mailhog/mailhog:latest
     container_name: medflow_mailhog
@@ -67,10 +82,166 @@ services:
     networks:
       - medflow-network
 
+  # Применяет SQL-миграции перед стартом backend/worker. Разовый контейнер:
+  # отрабатывает и выходит, `migrate up` идемпотентен при повторных `docker compose up`.
+  migrate:
+    image: migrate/migrate:v4.18.1
+    container_name: medflow_migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../backend/migrations:/migrations:ro
+    entrypoint: ["migrate"]
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-medflow}?sslmode=disable"
+      - "up"
+    networks:
+      - medflow-network
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      args:
+        CMD_PATH: cmd/api
+    container_name: medflow_backend
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      # Внутри compose-сети сервисы адресуются по имени и слушают свой
+      # внутренний порт — а не localhost и не порт, проброшенный на хост
+      # в .env (POSTGRES_PORT/REDIS_PORT там — для доступа с хост-машины).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      S3_ENDPOINT: minio:9000
+      SMTP_HOST: mailhog
+      MAILHOG_SMTP_PORT: "1025"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    networks:
+      - medflow-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      args:
+        CMD_PATH: cmd/worker
+    container_name: medflow_worker
+    restart: unless-stopped
+    env_file: ../.env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      S3_ENDPOINT: minio:9000
+      SMTP_HOST: mailhog
+      MAILHOG_SMTP_PORT: "1025"
+      # Локальная разработка: OLLAMA_HOST задаётся в .env и по умолчанию
+      # смотрит на host.docker.internal — Ollama на macOS работает нативно
+      # на хосте (Docker Desktop не пробрасывает Metal GPU в контейнеры).
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - medflow-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: /api/v1
+        VITE_USE_MOCKS: "false"
+    container_name: medflow_frontend
+    restart: unless-stopped
+    networks:
+      - medflow-network
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: medflow_caddy
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - medflow-network
+
+  # --- профиль "ai": `docker compose --profile ai up` ---
+  # На Linux-сервере с NVIDIA GPU — прод-вариант локальной LLM. На macOS для
+  # разработки быстрее и производительнее ставить Ollama нативно на хост
+  # (Docker Desktop не пробрасывает Metal GPU) и указать в .env:
+  # OLLAMA_HOST=http://host.docker.internal:11434 — тогда этот сервис не нужен.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: medflow_ollama
+    profiles: ["ai"]
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - medflow-network
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: medflow_ollama_init
+    profiles: ["ai"]
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command: >
+      "ollama pull ${OLLAMA_GENERATION_MODEL:-qwen2.5:7b-instruct} &&
+       ollama pull ${OLLAMA_EMBEDDING_MODEL:-bge-m3}"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - medflow-network
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+  caddy_data:
+  ollama_data:
 
 networks:
   medflow-network:

@@ -1,20 +1,35 @@
-.PHONY: up down logs migrate migrate-create migrate-down
+.PHONY: up up-ai down build logs logs-backend migrate migrate-create migrate-down
 
 # По умолчанию используем .env из корня
 ENV_FILE := .env
 COMPOSE_FILE := infra/docker-compose.yml
+COMPOSE := docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE)
 
-# Поднять все сервисы в фоне
+# Собрать образы backend/worker/frontend
+build:
+	$(COMPOSE) build
+
+# Поднять весь стек (postgres/redis/minio/backend/worker/frontend/caddy) в фоне.
+# Миграции применяются автоматически одноразовым сервисом `migrate`.
 up:
-	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) up -d
+	$(COMPOSE) up -d
+
+# То же самое + локальная Ollama в контейнере (профиль ai).
+# На macOS для разработки быстрее поставить Ollama нативно на хост, см. .env.example.
+up-ai:
+	$(COMPOSE) --profile ai up -d
 
 # Остановить и удалить контейнеры (данные в volumes сохраняются)
 down:
-	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) down
+	$(COMPOSE) down
 
 # Смотреть логи всех сервисов
 logs:
-	docker compose --env-file $(ENV_FILE) -f $(COMPOSE_FILE) logs -f
+	$(COMPOSE) logs -f
+
+# Смотреть логи только backend/worker
+logs-backend:
+	$(COMPOSE) logs -f backend worker
 
 # Применить все SQL миграции
 migrate:

@@ -1,0 +1,2229 @@
+openapi: 3.0.3
+info:
+  title: MedFlow API
+  description: |
+    REST API для PWA-приложения MedFlow — сервиса для студентов-медиков Москвы.
+    
+    Модули:
+    - Auth & Users
+    - Library (каталог учебников с лицензионными категориями A/B)
+    - Cards (ИИ-генерация карточек + интервальное повторение SM-2)
+    - Map (навигатор POI)
+    - Threads & Comments (форум)
+    - Subscriptions & Notifications
+    - Admin (модерация, аудит)
+  version: 1.0.0
+  contact:
+    name: MedFlow Team
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Локальная разработка
+  - url: https://api.medflow.ru/api/v1
+    description: Production
+
+tags:
+  - name: Auth
+    description: Регистрация, вход, токены
+  - name: Users
+    description: Профили пользователей
+  - name: Upload
+    description: Загрузка файлов (PDF, изображения)
+  - name: Library
+    description: Каталог учебников (публичный)
+  - name: Cards
+    description: ИИ-карточки и интервальное повторение
+  - name: Map
+    description: POI и навигатор
+  - name: Threads
+    description: Треды форума
+  - name: Comments
+    description: Комментарии к тредам
+  - name: Subscriptions
+    description: Подписки на треды/теги/пользователей
+  - name: Notifications
+    description: Внутренние уведомления
+  - name: Push
+    description: Web Push подписки (PWA)
+  - name: Admin Users
+    description: Управление пользователями (admin)
+  - name: Admin Reports
+    description: Обработка жалоб (moderator+)
+  - name: Admin Moderation
+    description: Скрытие/удаление контента
+  - name: Admin Library
+    description: CRUD учебников (admin)
+  - name: Admin POI
+    description: CRUD точек интереса (admin)
+  - name: Admin System
+    description: Статистика и аудит-логи (admin)
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ==================== AUTH ====================
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Регистрация нового пользователя
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Вход в систему
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Успешный вход
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Пользователь забанен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BanInfo'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Обновление access-токена по refresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: Новые токены (старый refresh инвалидирован)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Выход (инвалидация refresh-токена)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequest'
+      responses:
+        '204': { description: Успешный выход }
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Запрос ссылки для сброса пароля
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '200':
+          description: Всегда 200 (не раскрывает существование email)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Сброс пароля по токену из email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: { type: string }
+                new_password: { type: string, minLength: 8 }
+      responses:
+        '200':
+          description: Пароль сброшен
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/verify-email:
+    get:
+      tags: [Auth]
+      summary: Подтверждение email
+      security: []
+      parameters:
+        - name: token
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Email подтверждён
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # ==================== USERS ====================
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Текущий профиль
+      responses:
+        '200':
+          description: Профиль пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+    patch:
+      tags: [Users]
+      summary: Обновление профиля
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Обновлённый профиль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Users]
+      summary: Удаление аккаунта (soft delete)
+      parameters:
+        - name: password
+          in: query
+          required: true
+          schema: { type: string }
+          description: Пароль для подтверждения удаления
+      responses:
+        '204': { description: Аккаунт удалён }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Публичный профиль пользователя
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Публичный профиль
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicUser'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== UPLOAD ====================
+  /upload:
+    post:
+      tags: [Upload]
+      summary: Загрузка файла
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [pdf, image, avatar]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Файл загружен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  # ==================== LIBRARY ====================
+  /library/textbooks:
+    get:
+      tags: [Library]
+      summary: Каталог учебников
+      security: []
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: subject
+          in: query
+          schema: { type: string }
+        - name: course
+          in: query
+          schema: { type: integer }
+        - name: department
+          in: query
+          schema: { type: string }
+        - name: storage_type
+          in: query
+          schema: { $ref: '#/components/schemas/TextbookStorageType' }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [title_asc, title_desc, created_at_desc]
+            default: created_at_desc
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Список учебников
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TextbookListItem'
+
+  /library/textbooks/{id}:
+    get:
+      tags: [Library]
+      summary: Детали учебника
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Учебник
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Textbook'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /library/textbooks/{id}/download:
+    get:
+      tags: [Library]
+      summary: Скачать PDF (только категория A)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '302':
+          description: Редирект на presigned URL S3
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /library/textbooks/{id}/source:
+    get:
+      tags: [Library]
+      summary: Перейти к источнику (только категория B)
+      security: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '302':
+          description: Редирект на внешний URL
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ==================== CARDS ====================
+  /cards/tasks:
+    post:
+      tags: [Cards]
+      summary: Создать задачу на генерацию карточек
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCardTaskRequest'
+      responses:
+        '201':
+          description: Задача создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardTask'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+    get:
+      tags: [Cards]
+      summary: Список задач текущего пользователя
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CardTaskStatus' }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Список задач
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CardTask'
+
+  /cards/tasks/{id}:
+    get:
+      tags: [Cards]
+      summary: Детали задачи
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Задача
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardTask'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cards/tasks/{id}/cards:
+    get:
+      tags: [Cards]
+      summary: Карточки, сгенерированные задачей
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Список карточек
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Card'
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /cards/review:
+    get:
+      tags: [Cards]
+      summary: Получить батч карточек для повторения (SM-2)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        '200':
+          description: Батч карточек
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReviewCard'
+                  count: { type: integer }
+
+  /cards/{id}/rate:
+    post:
+      tags: [Cards]
+      summary: Оценить карточку (SM-2)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [grade]
+              properties:
+                grade:
+                  type: integer
+                  minimum: 0
+                  maximum: 3
+                  description: 0=не помню, 1=сложно, 2=норм, 3=легко
+      responses:
+        '200':
+          description: Обновлённый прогресс
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardProgressInfo'
+
+  /cards/{id}/report:
+    post:
+      tags: [Cards]
+      summary: Пожаловаться на карточку
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Жалоба создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+
+  /cards/stats:
+    get:
+      tags: [Cards]
+      summary: Статистика обучения
+      responses:
+        '200':
+          description: Статистика
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardsStats'
+
+  # ==================== MAP ====================
+  /map/poi:
+    get:
+      tags: [Map]
+      summary: Список POI
+      security: []
+      parameters:
+        - name: campus_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/PoiType' }
+        - name: lat
+          in: query
+          schema: { type: number, format: double }
+        - name: lon
+          in: query
+          schema: { type: number, format: double }
+        - name: radius
+          in: query
+          description: Радиус в метрах
+          schema: { type: integer, minimum: 0, maximum: 50000 }
+        - name: tags
+          in: query
+          description: Теги через запятую
+          schema: { type: string }
+      responses:
+        '200':
+          description: Список POI
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/POI'
+
+  # ==================== THREADS ====================
+  /threads:
+    get:
+      tags: [Threads]
+      summary: Лента тредов
+      parameters:
+        - name: tag
+          in: query
+          schema: { $ref: '#/components/schemas/ThreadTag' }
+        - name: author_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [created_at_desc, popular]
+            default: created_at_desc
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Список тредов
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ThreadListItem'
+    post:
+      tags: [Threads]
+      summary: Создать тред
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateThreadRequest'
+      responses:
+        '201':
+          description: Тред создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+
+  /threads/{id}:
+    get:
+      tags: [Threads]
+      summary: Детали треда
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Тред (views_count +1)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Threads]
+      summary: Обновить тред (только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateThreadRequest'
+      responses:
+        '200':
+          description: Обновлённый тред
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Threads]
+      summary: Удалить тред (soft, только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /threads/{id}/reactions:
+    post:
+      tags: [Threads]
+      summary: Поставить реакцию
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji: { type: string, maxLength: 10 }
+      responses:
+        '201':
+          description: Реакция добавлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reaction'
+    delete:
+      tags: [Threads]
+      summary: Убрать реакцию
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: emoji
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Реакция убрана }
+
+  /threads/{id}/report:
+    post:
+      tags: [Threads]
+      summary: Пожаловаться на тред
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Жалоба создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+
+  /threads/{id}/comments:
+    get:
+      tags: [Threads]
+      summary: Комментарии треда (дерево до 2 уровней)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Дерево комментариев
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CommentTree'
+
+  # ==================== COMMENTS ====================
+  /threads/{thread_id}/comments:
+    post:
+      tags: [Comments]
+      summary: Создать комментарий
+      parameters:
+        - name: thread_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: Комментарий создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /comments/{id}:
+    patch:
+      tags: [Comments]
+      summary: Редактировать комментарий (только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 5000 }
+      responses:
+        '200':
+          description: Обновлённый комментарий
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      tags: [Comments]
+      summary: Удалить комментарий (soft, только автор)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /comments/{id}/reactions:
+    post:
+      tags: [Comments]
+      summary: Поставить реакцию на комментарий
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji: { type: string, maxLength: 10 }
+      responses:
+        '201':
+          description: Реакция добавлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reaction'
+    delete:
+      tags: [Comments]
+      summary: Убрать реакцию с комментария
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: emoji
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '204': { description: Реакция убрана }
+
+  /comments/{id}/report:
+    post:
+      tags: [Comments]
+      summary: Пожаловаться на комментарий
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, maxLength: 2000 }
+      responses:
+        '201':
+          description: Жалоба создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+
+  # ==================== SUBSCRIPTIONS ====================
+  /subscriptions:
+    post:
+      tags: [Subscriptions]
+      summary: Подписаться
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubscriptionRequest'
+      responses:
+        '201':
+          description: Подписка создана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /subscriptions/{id}:
+    delete:
+      tags: [Subscriptions]
+      summary: Отписаться
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Отписка }
+
+  /subscriptions/feed:
+    get:
+      tags: [Subscriptions]
+      summary: Лента на основе подписок
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Лента тредов
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ThreadListItem'
+
+  # ==================== NOTIFICATIONS ====================
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: Список уведомлений
+      parameters:
+        - name: is_read
+          in: query
+          schema: { type: boolean }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Уведомления
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+                      unread_count: { type: integer }
+
+  /notifications/read:
+    patch:
+      tags: [Notifications]
+      summary: Пометить уведомления как прочитанные
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  properties:
+                    ids:
+                      type: array
+                      items: { type: string, format: uuid }
+                - type: object
+                  properties:
+                    read_all: { type: boolean, enum: [true] }
+      responses:
+        '200':
+          description: Обновлено
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+
+  # ==================== PUSH ====================
+  /push/subscribe:
+    post:
+      tags: [Push]
+      summary: Подписаться на Web Push
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushSubscriptionRequest'
+      responses:
+        '201':
+          description: Подписка сохранена
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+
+  /push/unsubscribe:
+    delete:
+      tags: [Push]
+      summary: Отписаться от Web Push
+      parameters:
+        - name: endpoint
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+          description: URL endpoint подписки
+      responses:
+        '204': { description: Отписан }
+
+  /push/preferences:
+    patch:
+      tags: [Push]
+      summary: Настройки push-уведомлений
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PushPreferences'
+      responses:
+        '200':
+          description: Обновлённые настройки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PushPreferences'
+
+  # ==================== ADMIN USERS ====================
+  /admin/users:
+    get:
+      tags: [Admin Users]
+      summary: Список пользователей (admin)
+      parameters:
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/UserRole' }
+        - name: banned
+          in: query
+          schema: { type: boolean }
+        - name: university
+          in: query
+          schema: { $ref: '#/components/schemas/University' }
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Список пользователей
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AdminUser'
+
+  /admin/users/{id}/role:
+    patch:
+      tags: [Admin Users]
+      summary: Сменить роль (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/UserRole' }
+      responses:
+        '200':
+          description: Роль обновлена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+
+  /admin/users/{id}/ban:
+    post:
+      tags: [Admin Users]
+      summary: Забанить пользователя (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Забанен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+    delete:
+      tags: [Admin Users]
+      summary: Разбанить пользователя (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Разбанен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminUser'
+
+  # ==================== ADMIN REPORTS ====================
+  /admin/reports:
+    get:
+      tags: [Admin Reports]
+      summary: Список жалоб (moderator+)
+      parameters:
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ReportStatus' }
+        - name: target_type
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Список жалоб
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Report'
+
+  /admin/reports/{id}:
+    patch:
+      tags: [Admin Reports]
+      summary: Рассмотреть жалобу (moderator+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [reviewed, dismissed]
+                resolution_note: { type: string }
+      responses:
+        '200':
+          description: Жалоба обработана
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Report'
+
+  # ==================== ADMIN MODERATION ====================
+  /admin/threads/{id}/hide:
+    post:
+      tags: [Admin Moderation]
+      summary: Скрыть тред (moderator+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Тред скрыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Thread'
+
+  /admin/comments/{id}/hide:
+    post:
+      tags: [Admin Moderation]
+      summary: Скрыть комментарий (moderator+)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: Комментарий скрыт
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+
+  /admin/threads/{id}:
+    delete:
+      tags: [Admin Moderation]
+      summary: Полное удаление треда (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+
+  /admin/comments/{id}:
+    delete:
+      tags: [Admin Moderation]
+      summary: Полное удаление комментария (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+
+  # ==================== ADMIN LIBRARY ====================
+  /admin/library/textbooks:
+    get:
+      tags: [Admin Library]
+      summary: Все учебники (включая скрытые/удалённые)
+      parameters:
+        - name: storage_type
+          in: query
+          schema: { $ref: '#/components/schemas/TextbookStorageType' }
+        - name: include_hidden
+          in: query
+          schema: { type: boolean, default: false }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Список учебников
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Textbook'
+    post:
+      tags: [Admin Library]
+      summary: Создать учебник (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTextbookRequest'
+      responses:
+        '201':
+          description: Учебник создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Textbook'
+
+  /admin/library/textbooks/{id}:
+    patch:
+      tags: [Admin Library]
+      summary: Обновить учебник (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTextbookRequest'
+      responses:
+        '200':
+          description: Обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Textbook'
+    delete:
+      tags: [Admin Library]
+      summary: Удалить учебник (soft, admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+
+  # ==================== ADMIN POI ====================
+  /admin/poi:
+    get:
+      tags: [Admin POI]
+      summary: Все POI
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Список POI
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/POI'
+    post:
+      tags: [Admin POI]
+      summary: Создать POI (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePOIRequest'
+      responses:
+        '201':
+          description: POI создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POI'
+
+  /admin/poi/{id}:
+    patch:
+      tags: [Admin POI]
+      summary: Обновить POI (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePOIRequest'
+      responses:
+        '200':
+          description: Обновлён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/POI'
+    delete:
+      tags: [Admin POI]
+      summary: Удалить POI (admin)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Удалён }
+
+  # ==================== ADMIN SYSTEM ====================
+  /admin/stats:
+    get:
+      tags: [Admin System]
+      summary: Статистика системы (admin)
+      responses:
+        '200':
+          description: Статистика
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminStats'
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin System]
+      summary: Аудит-логи (admin)
+      parameters:
+        - name: actor_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          schema: { $ref: '#/components/schemas/AuditAction' }
+        - name: target_type
+          in: query
+          schema: { type: string }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Список логов
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditLog'
+
+# ==================== COMPONENTS ====================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT access-токен
+
+  responses:
+    BadRequest:
+      description: Ошибка валидации
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Недостаточно прав
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Ресурс не найден
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Конфликт (дублирование)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Превышен лимит запросов
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # ---------- Enums ----------
+    UserRole:
+      type: string
+      enum: [guest, user, moderator, admin]
+    University:
+      type: string
+      enum: [sechenov, pirogov, evdokimov, other]
+    TextbookStorageType:
+      type: string
+      enum: [A, B]
+    TextbookLicenseType:
+      type: string
+      enum: [cc_by, cc_by_nc, cc_by_sa, cc0, public_domain, all_rights_reserved, custom]
+    CardTaskStatus:
+      type: string
+      enum: [pending, processing, done, failed]
+    CardTaskSourceType:
+      type: string
+      enum: [catalog_textbook, user_upload]
+    CardDifficulty:
+      type: string
+      enum: [easy, medium, hard]
+    PoiType:
+      type: string
+      enum: [coworking, cafe, library, canteen, park, other]
+    ThreadTag:
+      type: string
+      enum: [study, department, humor, marketplace, clinical_base, news, help, other]
+    ReportStatus:
+      type: string
+      enum: [pending, reviewed, dismissed]
+    SubscriptionTargetType:
+      type: string
+      enum: [thread, user, tag]
+    ReactionTargetType:
+      type: string
+      enum: [thread, comment]
+    AuditAction:
+      type: string
+      enum:
+        - user_ban
+        - user_unban
+        - user_role_change
+        - thread_hide
+        - thread_unhide
+        - thread_delete
+        - comment_hide
+        - comment_unhide
+        - comment_delete
+        - poi_create
+        - poi_update
+        - poi_delete
+        - textbook_create
+        - textbook_update
+        - textbook_delete
+    NotificationType:
+      type: string
+      enum:
+        - thread_reply
+        - comment_reply
+        - reaction
+        - card_task_done
+        - card_task_failed
+        - moderation_action
+        - system
+
+    # ---------- Common ----------
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string }
+                  reason: { type: string }
+
+    PaginationWrapper:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            page: { type: integer }
+            limit: { type: integer }
+            total: { type: integer }
+            has_next: { type: boolean }
+
+    # ---------- Auth ----------
+    RegisterRequest:
+      type: object
+      required: [email, password, nickname, agree_to_terms]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+        nickname: { type: string, minLength: 3, maxLength: 50 }
+        university: { $ref: '#/components/schemas/University' }
+        course: { type: integer, minimum: 1, maximum: 7 }
+        faculty: { type: string, maxLength: 100 }
+        agree_to_terms: { type: boolean, enum: [true] }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    LogoutRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+
+    AuthResponse:
+      type: object
+      properties:
+        user: { $ref: '#/components/schemas/UserProfile' }
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_in: { type: integer, description: Секунды до истечения access-токена }
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        expires_in: { type: integer }
+
+    BanInfo:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string, enum: [BANNED] }
+            message: { type: string }
+            ban_reason: { type: string }
+            banned_at: { type: string, format: date-time }
+
+    # ---------- Users ----------
+    UserProfile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        nickname: { type: string }
+        role: { $ref: '#/components/schemas/UserRole' }
+        university: { $ref: '#/components/schemas/University' }
+        course: { type: integer }
+        faculty: { type: string }
+        email_verified_at: { type: string, format: date-time, nullable: true }
+        banned_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    PublicUser:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nickname: { type: string }
+        university: { $ref: '#/components/schemas/University' }
+        course: { type: integer }
+        faculty: { type: string }
+        created_at: { type: string, format: date-time }
+        threads_count: { type: integer }
+        is_banned: { type: boolean }
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        nickname: { type: string, minLength: 3, maxLength: 50 }
+        university: { $ref: '#/components/schemas/University' }
+        course: { type: integer, minimum: 1, maximum: 7 }
+        faculty: { type: string, maxLength: 100 }
+
+    AdminUser:
+      allOf:
+        - $ref: '#/components/schemas/UserProfile'
+        - type: object
+          properties:
+            ban_reason: { type: string }
+            banned_by: { type: string, format: uuid }
+
+    # ---------- Upload ----------
+    UploadResponse:
+      type: object
+      properties:
+        file_id: { type: string, format: uuid }
+        url: { type: string, format: uri }
+        size_bytes: { type: integer }
+        mime_type: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+
+    # ---------- Library ----------
+    Textbook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        authors: { type: string }
+        isbn: { type: string }
+        year: { type: integer }
+        pages: { type: integer }
+        description: { type: string }
+        subject: { type: string }
+        course: { type: integer }
+        department: { type: string }
+        storage_type: { $ref: '#/components/schemas/TextbookStorageType' }
+        license_type: { $ref: '#/components/schemas/TextbookLicenseType' }
+        copyright_holder: { type: string }
+        hidden_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    TextbookListItem:
+      type: object
+      description: Для категории B — только title, storage_type, license_type
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        authors: { type: string, nullable: true }
+        isbn: { type: string, nullable: true }
+        year: { type: integer, nullable: true }
+        subject: { type: string, nullable: true }
+        course: { type: integer, nullable: true }
+        storage_type: { $ref: '#/components/schemas/TextbookStorageType' }
+        license_type: { $ref: '#/components/schemas/TextbookLicenseType' }
+        created_at: { type: string, format: date-time }
+
+    CreateTextbookRequest:
+      type: object
+      required: [title, storage_type]
+      properties:
+        title: { type: string, maxLength: 500 }
+        authors: { type: string }
+        isbn: { type: string, maxLength: 20 }
+        year: { type: integer }
+        pages: { type: integer }
+        description: { type: string }
+        subject: { type: string, maxLength: 100 }
+        course: { type: integer }
+        department: { type: string, maxLength: 100 }
+        storage_type: { $ref: '#/components/schemas/TextbookStorageType' }
+        license_type: { $ref: '#/components/schemas/TextbookLicenseType' }
+        copyright_holder: { type: string, maxLength: 255 }
+        pdf_file_id: { type: string, format: uuid, description: Только для категории A }
+        source_url: { type: string, format: uri, description: Только для категории B }
+
+    UpdateTextbookRequest:
+      type: object
+      properties:
+        title: { type: string, maxLength: 500 }
+        authors: { type: string }
+        isbn: { type: string }
+        year: { type: integer }
+        pages: { type: integer }
+        description: { type: string }
+        subject: { type: string }
+        course: { type: integer }
+        department: { type: string }
+        storage_type: { $ref: '#/components/schemas/TextbookStorageType' }
+        license_type: { $ref: '#/components/schemas/TextbookLicenseType' }
+        copyright_holder: { type: string }
+        pdf_file_id: { type: string, format: uuid }
+        source_url: { type: string, format: uri }
+
+    # ---------- Cards ----------
+    CreateCardTaskRequest:
+      type: object
+      required: [file_id, topic]
+      properties:
+        file_id: { type: string, format: uuid }
+        textbook_id: { type: string, format: uuid }
+        topic: { type: string, maxLength: 255 }
+        difficulty: { $ref: '#/components/schemas/CardDifficulty' }
+        cards_count: { type: integer, minimum: 1, maximum: 100 }
+
+    CardTask:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/CardTaskStatus' }
+        position_in_queue: { type: integer, nullable: true }
+        estimated_wait_seconds: { type: integer, nullable: true }
+        cards_count: { type: integer }
+        error_message: { type: string, nullable: true }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Card:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        chapter: { type: string }
+        topic: { type: string }
+        subtopic: { type: string }
+        question: { type: string }
+        answer: { type: string }
+        page_approx: { type: integer }
+        source_reference: { type: string }
+        difficulty: { $ref: '#/components/schemas/CardDifficulty' }
+        disclaimer: { type: string }
+        created_at: { type: string, format: date-time }
+
+    ReviewCard:
+      type: object
+      properties:
+        card_id: { type: string, format: uuid }
+        question: { type: string }
+        answer: { type: string }
+        disclaimer: { type: string }
+        progress: { $ref: '#/components/schemas/CardProgressInfo' }
+
+    CardProgressInfo:
+      type: object
+      properties:
+        next_review_at: { type: string, format: date-time }
+        interval_days: { type: integer }
+        ease_factor: { type: number, format: double }
+        repetitions: { type: integer }
+
+    CardsStats:
+      type: object
+      properties:
+        total_cards_learned: { type: integer }
+        due_today: { type: integer }
+        streak_days: { type: integer }
+        avg_ease_factor: { type: number, format: double }
+        by_difficulty:
+          type: object
+          properties:
+            easy: { type: integer }
+            medium: { type: integer }
+            hard: { type: integer }
+
+    # ---------- Map ----------
+    POI:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/PoiType' }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        address: { type: string }
+        description: { type: string }
+        photo_url: { type: string, format: uri }
+        rating: { type: number, format: double }
+        tags:
+          type: array
+          items: { type: string }
+        distance_meters: { type: integer, nullable: true }
+        walking_time_seconds: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    CreatePOIRequest:
+      type: object
+      required: [name, type, latitude, longitude]
+      properties:
+        name: { type: string, maxLength: 255 }
+        type: { $ref: '#/components/schemas/PoiType' }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        address: { type: string }
+        description: { type: string }
+        photo_url: { type: string, format: uri }
+        tags:
+          type: array
+          items: { type: string }
+
+    UpdatePOIRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 255 }
+        type: { $ref: '#/components/schemas/PoiType' }
+        latitude: { type: number, format: double }
+        longitude: { type: number, format: double }
+        address: { type: string }
+        description: { type: string }
+        photo_url: { type: string, format: uri }
+        tags:
+          type: array
+          items: { type: string }
+
+    # ---------- Threads ----------
+    Thread:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        author: { $ref: '#/components/schemas/PublicUser' }
+        title: { type: string }
+        content: { type: string }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/ThreadTag' }
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              url: { type: string, format: uri }
+              name: { type: string }
+              size_bytes: { type: integer }
+        views_count: { type: integer }
+        likes_count: { type: integer }
+        comments_count: { type: integer }
+        hidden_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    ThreadListItem:
+      allOf:
+        - $ref: '#/components/schemas/Thread'
+        - type: object
+          description: Без поля content
+
+    CreateThreadRequest:
+      type: object
+      required: [title, content]
+      properties:
+        title: { type: string, maxLength: 500 }
+        content: { type: string, maxLength: 50000 }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/ThreadTag' }
+          maxItems: 5
+        file_ids:
+          type: array
+          items: { type: string, format: uuid }
+          maxItems: 5
+
+    UpdateThreadRequest:
+      type: object
+      properties:
+        title: { type: string, maxLength: 500 }
+        content: { type: string, maxLength: 50000 }
+        tags:
+          type: array
+          items: { $ref: '#/components/schemas/ThreadTag' }
+
+    # ---------- Comments ----------
+    Comment:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        author: { $ref: '#/components/schemas/PublicUser' }
+        content: { type: string }
+        depth: { type: integer }
+        likes_count: { type: integer }
+        hidden_at: { type: string, format: date-time, nullable: true }
+        deleted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    CommentTree:
+      allOf:
+        - $ref: '#/components/schemas/Comment'
+        - type: object
+          properties:
+            replies:
+              type: array
+              items: { $ref: '#/components/schemas/Comment' }
+
+    CreateCommentRequest:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1, maxLength: 5000 }
+        parent_id: { type: string, format: uuid, nullable: true }
+
+    # ---------- Reactions ----------
+    Reaction:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        emoji: { type: string }
+        target_type: { $ref: '#/components/schemas/ReactionTargetType' }
+        target_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    # ---------- Reports ----------
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        reporter_id: { type: string, format: uuid }
+        target_type: { type: string }
+        target_id: { type: string, format: uuid }
+        reason: { type: string }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        reviewed_by: { type: string, format: uuid, nullable: true }
+        reviewed_at: { type: string, format: date-time, nullable: true }
+        resolution_note: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    # ---------- Subscriptions ----------
+    Subscription:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        target_type: { $ref: '#/components/schemas/SubscriptionTargetType' }
+        target_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+
+    CreateSubscriptionRequest:
+      type: object
+      required: [target_type, target_id]
+      properties:
+        target_type: { $ref: '#/components/schemas/SubscriptionTargetType' }
+        target_id: { type: string, format: uuid }
+
+    # ---------- Notifications ----------
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/NotificationType' }
+        title: { type: string }
+        message: { type: string }
+        payload:
+          type: object
+          additionalProperties: true
+        target_type: { type: string, nullable: true }
+        target_id: { type: string, format: uuid, nullable: true }
+        is_read: { type: boolean }
+        read_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    # ---------- Push ----------
+    PushSubscriptionRequest:
+      type: object
+      required: [endpoint, p256dh, auth]
+      properties:
+        endpoint: { type: string, format: uri }
+        p256dh: { type: string }
+        auth: { type: string }
+
+    PushPreferences:
+      type: object
+      properties:
+        thread_reply: { type: boolean }
+        comment_reply: { type: boolean }
+        reaction: { type: boolean }
+        card_task_done: { type: boolean }
+        card_task_failed: { type: boolean }
+        moderation_action: { type: boolean }
+        system: { type: boolean }
+
+    # ---------- Admin ----------
+    AdminStats:
+      type: object
+      properties:
+        users_total: { type: integer }
+        users_banned: { type: integer }
+        threads_total: { type: integer }
+        card_tasks_total: { type: integer }
+        card_tasks_pending: { type: integer }
+        active_sessions: { type: integer }
+
+    AuditLog:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        actor_id: { type: string, format: uuid }
+        actor_nickname: { type: string }
+        action: { $ref: '#/components/schemas/AuditAction' }
+        target_type: { type: string, nullable: true }
+        target_id: { type: string, format: uuid, nullable: true }
+        reason: { type: string, nullable: true }
+        metadata:
+          type: object
+          additionalProperties: true
+          nullable: true
+        ip_address: { type: string }
+        created_at: { type: string, format: date-time }

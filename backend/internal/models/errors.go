@@ -9,4 +9,8 @@ var (
 	ErrNicknameExists     = errors.New("nickname already exists")
 	ErrTokenNotFound      = errors.New("refresh token not found")
 	ErrTokenHashExists    = errors.New("token hash already exists")
+
+	ErrThreadNotFound   = errors.New("thread not found")
+	ErrCommentNotFound  = errors.New("comment not found")
+	ErrReactionNotFound = errors.New("reaction not found")
 )

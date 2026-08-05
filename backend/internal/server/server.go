@@ -34,13 +34,21 @@ func New(cfg *config.Config) (*Server, error) {
 
 	userRepo := repository.NewUserRepo(pool)
 	tokenRepo := repository.NewTokenRepo(pool)
+	threadRepo := repository.NewThreadRepo(pool)
+	commentRepo := repository.NewCommentRepo(pool)
+	reactionRepo := repository.NewReactionRepo(pool)
+	reportRepo := repository.NewReportRepo(pool)
 
 	tokenService := service.NewTokenService(cfg)
 	authService := service.NewAuthService(userRepo, tokenRepo, tokenService, cfg)
+	forumService := service.NewForumService(threadRepo, commentRepo, reactionRepo, reportRepo)
+	userService := service.NewUserService(userRepo, tokenRepo)
 
 	authHandler := handler.NewAuthHandler(authService)
+	forumHandler := handler.NewForumHandler(forumService)
+	userHandler := handler.NewUserHandler(userService)
 
-	router := SetupRouter(cfg, authHandler)
+	router := SetupRouter(cfg, authHandler, forumHandler, userHandler)
 
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.App.Port),

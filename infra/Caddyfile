@@ -1,0 +1,19 @@
+# Локально/до появления домena слушаем голый :80 — Caddy включает автоматический
+# HTTPS только для адресов, похожих на домен. Как появится домен (см. открытый
+# вопрос №3 в плане проекта), замените ":80" на сам домен, например "medflow.ru" —
+# Caddy сам получит сертификат Let's Encrypt, ничего больше менять не нужно.
+:80 {
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	handle /health {
+		reverse_proxy backend:8080
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	encode gzip
+}

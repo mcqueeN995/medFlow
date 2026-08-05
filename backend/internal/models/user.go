@@ -37,10 +37,15 @@ type User struct {
 	BannedAt        *time.Time  `json:"banned_at,omitempty"`
 	BanReason       *string     `json:"ban_reason,omitempty"`
 	BannedBy        *uuid.UUID  `json:"banned_by,omitempty"`
+	DeletedAt       *time.Time  `json:"-"`
 	CreatedAt       time.Time   `json:"created_at"`
 	UpdatedAt       time.Time   `json:"updated_at"`
 }
 
 func (u *User) IsBanned() bool {
 	return u.BannedAt != nil
+}
+
+func (u *User) IsDeleted() bool {
+	return u.DeletedAt != nil
 }

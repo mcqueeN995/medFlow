@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"github.com/spf13/viper"
@@ -14,6 +16,8 @@ type Config struct {
 	S3       S3Config
 	JWT      JWTConfig
 	Email    EmailConfig
+	LLM      LLMConfig
+	Ollama   OllamaConfig
 }
 
 type AppConfig struct {
@@ -59,12 +63,46 @@ type EmailConfig struct {
 	From     string
 }
 
+// LLMConfig — облачный провайдер генерации карточек (прод по умолчанию).
+type LLMConfig struct {
+	Provider       string
+	APIKey         string
+	Model          string
+	EmbeddingModel string
+}
+
+// OllamaConfig — локальный провайдер для dev-окружения и приватной обработки.
+type OllamaConfig struct {
+	Host            string
+	GenerationModel string
+	EmbeddingModel  string
+}
+
+// withDefault возвращает значение переменной окружения или def, если она не задана.
+// Используется для хостов сервисов: локально (вне Docker) они слушают на localhost
+// через проброшенные порты, а в docker-compose приходят как имена сервисов
+// (POSTGRES_HOST=postgres и т.д., см. infra/docker-compose.yml).
+func withDefault(key, def string) string {
+	if v := viper.GetString(key); v != "" {
+		return v
+	}
+	return def
+}
+
 func Load() (*Config, error) {
+	// ../.env удобен для локального запуска `go run` из backend/, но в контейнере
+	// такого файла нет — переменные приходят напрямую через env_file/environment
+	// в docker-compose. Отсутствие файла не должно быть фатальной ошибкой.
 	viper.SetConfigFile("../.env")
 	viper.AutomaticEnv()
 
 	if err := viper.ReadInConfig(); err != nil {
-		return nil, fmt.Errorf("error reading config: %w", err)
+		// SetConfigFile с явным путём при отсутствии файла возвращает "голую" fs-ошибку
+		// (не viper.ConfigFileNotFoundError — тот только для поиска по AddConfigPath).
+		var notFound viper.ConfigFileNotFoundError
+		if !errors.As(err, &notFound) && !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("error reading config: %w", err)
+		}
 	}
 
 	accessExpire, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_EXPIRE"))
@@ -80,15 +118,15 @@ func Load() (*Config, error) {
 			User:     viper.GetString("POSTGRES_USER"),
 			Password: viper.GetString("POSTGRES_PASSWORD"),
 			DBName:   viper.GetString("POSTGRES_DB"),
-			Host:     "localhost",
+			Host:     withDefault("POSTGRES_HOST", "localhost"),
 			Port:     viper.GetString("POSTGRES_PORT"),
 		},
 		Redis: RedisConfig{
-			Host: "localhost",
+			Host: withDefault("REDIS_HOST", "localhost"),
 			Port: viper.GetString("REDIS_PORT"),
 		},
 		S3: S3Config{
-			Endpoint:   fmt.Sprintf("localhost:%s", viper.GetString("MINIO_API_PORT")),
+			Endpoint:   withDefault("S3_ENDPOINT", fmt.Sprintf("localhost:%s", viper.GetString("MINIO_API_PORT"))),
 			AccessKey:  viper.GetString("MINIO_ROOT_USER"),
 			SecretKey:  viper.GetString("MINIO_ROOT_PASSWORD"),
 			BucketName: viper.GetString("S3_BUCKET_NAME"),
@@ -102,11 +140,22 @@ func Load() (*Config, error) {
 			RefreshExpire: refreshExpire,
 		},
 		Email: EmailConfig{
-			SMTPHost: "localhost",
+			SMTPHost: withDefault("SMTP_HOST", "localhost"),
 			SMTPPort: viper.GetString("MAILHOG_SMTP_PORT"),
 			Username: "",
 			Password: "",
 			From:     "noreply@medflow.local",
+		},
+		LLM: LLMConfig{
+			Provider:       viper.GetString("LLM_PROVIDER"),
+			APIKey:         viper.GetString("LLM_API_KEY"),
+			Model:          viper.GetString("LLM_MODEL"),
+			EmbeddingModel: viper.GetString("LLM_EMBEDDING_MODEL"),
+		},
+		Ollama: OllamaConfig{
+			Host:            withDefault("OLLAMA_HOST", "http://localhost:11434"),
+			GenerationModel: withDefault("OLLAMA_GENERATION_MODEL", "qwen2.5:7b-instruct"),
+			EmbeddingModel:  withDefault("OLLAMA_EMBEDDING_MODEL", "bge-m3"),
 		},
 	}
 

@@ -58,7 +58,7 @@ CREATE TABLE textbook_chunks (
     chunk_index int NOT NULL,
     content text NOT NULL,
     page_number int,
-    embedding vector(1536),
+    embedding vector(1024), -- bge-m3 (Ollama), мультиязычная, 1024-dim
     created_at timestamp DEFAULT now(),
     CONSTRAINT fk_textbook_chunks_textbook FOREIGN KEY (textbook_id) REFERENCES textbooks(id),
     CONSTRAINT fk_textbook_chunks_task FOREIGN KEY (task_id) REFERENCES card_tasks(id)
