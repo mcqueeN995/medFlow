@@ -1,4 +1,4 @@
-.PHONY: up up-ai down build logs logs-backend migrate migrate-create migrate-down
+.PHONY: up up-ai up-monitoring down build logs logs-backend migrate migrate-create migrate-down
 
 # По умолчанию используем .env из корня
 ENV_FILE := .env
@@ -18,6 +18,11 @@ up:
 # На macOS для разработки быстрее поставить Ollama нативно на хост, см. .env.example.
 up-ai:
 	$(COMPOSE) --profile ai up -d
+
+# То же самое + Prometheus/Grafana/Pushgateway (профиль monitoring).
+# Grafana: http://localhost:$${GRAFANA_PORT:-3000} (admin/admin по умолчанию).
+up-monitoring:
+	$(COMPOSE) --profile monitoring up -d
 
 # Остановить и удалить контейнеры (данные в volumes сохраняются)
 down:

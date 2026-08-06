@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { GraduationCap, LogOut, Mail, Trash2 } from 'lucide-react'
+import { Bell, GraduationCap, LogOut, Mail, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { deleteUsersMe, getUsersMe, patchUsersMe } from '@/api/generated/medFlowAPI'
+import { deleteUsersMe, getUsersMe, patchPushPreferences, patchUsersMe } from '@/api/generated/medFlowAPI'
 import { University, UserRole } from '@/api/generated'
-import type { UserProfile } from '@/api/generated'
+import type { PushPreferences, UserProfile } from '@/api/generated'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useAuthStore } from '@/stores/auth-store'
 import { formatDate } from '@/lib/library'
+import { getCurrentPushSubscription, isPushSupported, subscribeToPush, unsubscribeFromPush } from '@/lib/push'
+
+const PUSH_PREFERENCE_LABELS: { key: keyof PushPreferences; label: string }[] = [
+  { key: 'thread_reply', label: 'Ответы в темах' },
+  { key: 'comment_reply', label: 'Ответы на комментарии' },
+  { key: 'reaction', label: 'Реакции' },
+  { key: 'card_task_done', label: 'Карточки готовы' },
+  { key: 'card_task_failed', label: 'Ошибка генерации карточек' },
+  { key: 'moderation_action', label: 'Действия модерации' },
+  { key: 'system', label: 'Системные уведомления' },
+]
 
 const UNIVERSITY_LABELS: Record<string, string> = {
   [University.sechenov]: 'Сеченовский университет',
@@ -46,6 +58,10 @@ export function ProfilePage() {
   const [deletePassword, setDeletePassword] = useState('')
   const [deleteSubmitting, setDeleteSubmitting] = useState(false)
 
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushPrefs, setPushPrefs] = useState<PushPreferences | null>(null)
+
   useEffect(() => {
     getUsersMe()
       .then((p) => {
@@ -56,7 +72,46 @@ export function ProfilePage() {
         setFaculty(p.faculty ?? '')
       })
       .finally(() => setLoading(false))
+
+    if (isPushSupported()) {
+      getCurrentPushSubscription().then((sub) => {
+        setPushSubscribed(!!sub)
+        // PATCH с пустым телом ничего не меняет (все поля опциональны), но
+        // возвращает актуальные настройки - отдельного GET-эндпоинта для
+        // чтения preferences в контракте нет.
+        if (sub) patchPushPreferences({}).then(setPushPrefs)
+      })
+    }
   }, [])
+
+  async function onTogglePush() {
+    setPushBusy(true)
+    try {
+      if (pushSubscribed) {
+        await unsubscribeFromPush()
+        setPushSubscribed(false)
+        setPushPrefs(null)
+        toast.success('Push-уведомления отключены')
+      } else {
+        await subscribeToPush()
+        setPushSubscribed(true)
+        toast.success('Push-уведомления включены')
+      }
+    } catch {
+      toast.error('Не удалось изменить подписку на push-уведомления')
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function onTogglePreference(key: keyof PushPreferences, value: boolean) {
+    try {
+      const updated = await patchPushPreferences({ [key]: value })
+      setPushPrefs(updated)
+    } catch {
+      toast.error('Не удалось сохранить настройку')
+    }
+  }
 
   async function onSave(e: React.FormEvent) {
     e.preventDefault()
@@ -206,6 +261,40 @@ export function ProfilePage() {
       <Button variant="outline" className="h-11 w-fit rounded-full" onClick={onLogout}>
         <LogOut className="size-4" /> Выйти
       </Button>
+
+      <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Bell className="size-4 text-muted-foreground" />
+            <h2 className="font-semibold text-foreground">Push-уведомления</h2>
+          </div>
+          {isPushSupported() ? (
+            <Button variant={pushSubscribed ? 'outline' : 'default'} size="sm" className="h-9 rounded-full" disabled={pushBusy} onClick={onTogglePush}>
+              {pushBusy ? 'Подождите…' : pushSubscribed ? 'Отключить' : 'Включить'}
+            </Button>
+          ) : (
+            <span className="text-xs text-muted-foreground">Не поддерживается вашим браузером</span>
+          )}
+        </div>
+
+        {pushSubscribed && pushPrefs && (
+          <div className="flex flex-col gap-2.5">
+            {PUSH_PREFERENCE_LABELS.map(({ key, label }) => (
+              <label key={key} className="flex items-center gap-2.5 text-sm text-foreground">
+                <Checkbox
+                  checked={pushPrefs[key] ?? true}
+                  onCheckedChange={(v) => {
+                    const value = v === true
+                    setPushPrefs((prev) => (prev ? { ...prev, [key]: value } : prev))
+                    onTogglePreference(key, value)
+                  }}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex flex-col gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5">
         <div>

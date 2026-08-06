@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/medflow/backend/internal/dto"
+	"github.com/medflow/backend/internal/models"
 	"github.com/medflow/backend/internal/service"
 )
 
@@ -99,4 +100,111 @@ func (h *UserHandler) PublicProfile(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, profile)
+}
+
+// ==================== ADMIN ====================
+
+// AdminListUsers GET /api/v1/admin/users
+func (h *UserHandler) AdminListUsers(c *gin.Context) {
+	var q struct {
+		Role       string `form:"role"`
+		Banned     *bool  `form:"banned"`
+		University string `form:"university"`
+		Q          string `form:"q"`
+		Page       int    `form:"page,default=1"`
+		Limit      int    `form:"limit,default=20"`
+	}
+	if err := c.ShouldBindQuery(&q); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid query params", nil)
+		return
+	}
+
+	filter := models.AdminUserListFilter{Banned: q.Banned, Page: q.Page, Limit: q.Limit}
+	if q.Role != "" {
+		role := models.UserRole(q.Role)
+		filter.Role = &role
+	}
+	if q.University != "" {
+		uni := models.University(q.University)
+		filter.University = &uni
+	}
+	if q.Q != "" {
+		filter.Q = &q.Q
+	}
+
+	pagination, items, err := h.userService.AdminList(c.Request.Context(), filter)
+	if err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"pagination": pagination, "data": items})
+}
+
+// AdminChangeRole PATCH /api/v1/admin/users/:id/role
+func (h *UserHandler) AdminChangeRole(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+
+	var req dto.ChangeRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	user, err := h.userService.AdminChangeRole(c.Request.Context(), actorID, id, req.Role)
+	if err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+// AdminBanUser POST /api/v1/admin/users/:id/ban
+func (h *UserHandler) AdminBanUser(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+
+	var req dto.BanRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	user, err := h.userService.AdminBan(c.Request.Context(), actorID, id, req.Reason)
+	if err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, user)
+}
+
+// AdminUnbanUser DELETE /api/v1/admin/users/:id/ban
+func (h *UserHandler) AdminUnbanUser(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+
+	user, err := h.userService.AdminUnban(c.Request.Context(), actorID, id)
+	if err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, user)
 }

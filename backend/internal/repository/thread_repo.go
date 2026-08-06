@@ -24,7 +24,7 @@ func NewThreadRepo(pool *pgxpool.Pool) *ThreadRepo {
 // регистрации типа в pgtype.Map.
 const threadSelectColumns = `
 	t.id, t.title, t.content, t.tags::text[], t.views_count, t.likes_count, t.comments_count,
-	t.hidden_at, t.deleted_at, t.created_at, t.updated_at,
+	t.hidden_at, t.hidden_by, t.hidden_reason, t.deleted_at, t.created_at, t.updated_at,
 	u.id, u.nickname, u.university, u.course, u.faculty, u.created_at,
 	(SELECT count(*) FROM threads t2 WHERE t2.author_id = u.id AND t2.deleted_at IS NULL)
 `
@@ -34,7 +34,7 @@ func (r *ThreadRepo) scanThread(row pgx.Row) (*models.Thread, error) {
 	var tags []string
 	err := row.Scan(
 		&t.ID, &t.Title, &t.Content, &tags, &t.ViewsCount, &t.LikesCount, &t.CommentsCount,
-		&t.HiddenAt, &t.DeletedAt, &t.CreatedAt, &t.UpdatedAt,
+		&t.HiddenAt, &t.HiddenBy, &t.HiddenReason, &t.DeletedAt, &t.CreatedAt, &t.UpdatedAt,
 		&t.Author.ID, &t.Author.Nickname, &t.Author.University, &t.Author.Course, &t.Author.Faculty, &t.Author.CreatedAt,
 		&t.Author.ThreadsCount,
 	)
@@ -80,6 +80,19 @@ func (r *ThreadRepo) Update(ctx context.Context, id uuid.UUID, title, content st
 		UPDATE threads SET title = $2, content = $3, tags = $4::thread_tag[], updated_at = now()
 		WHERE id = $1 AND deleted_at IS NULL
 	`, id, title, content, tagsToStrings(tags))
+	if err != nil {
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrThreadNotFound
+	}
+	return r.FindByID(ctx, id)
+}
+
+func (r *ThreadRepo) Hide(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Thread, error) {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE threads SET hidden_at = now(), hidden_by = $2, hidden_reason = $3 WHERE id = $1 AND deleted_at IS NULL
+	`, id, hiddenBy, reason)
 	if err != nil {
 		return nil, err
 	}

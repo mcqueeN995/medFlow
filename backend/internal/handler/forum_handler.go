@@ -356,3 +356,87 @@ func (h *ForumHandler) report(c *gin.Context, param, targetType string) {
 	}
 	c.JSON(http.StatusCreated, report)
 }
+
+// ==================== ADMIN (moderator+/admin) ====================
+
+// AdminHideThread POST /api/v1/admin/threads/:id/hide
+func (h *ForumHandler) AdminHideThread(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	var req dto.HideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	thread, err := h.forumService.AdminHideThread(c.Request.Context(), actorID, id, req.Reason)
+	if err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, thread)
+}
+
+// AdminHideComment POST /api/v1/admin/comments/:id/hide
+func (h *ForumHandler) AdminHideComment(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	var req dto.HideRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	comment, err := h.forumService.AdminHideComment(c.Request.Context(), actorID, id, req.Reason)
+	if err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, comment)
+}
+
+// AdminDeleteThread DELETE /api/v1/admin/threads/:id
+func (h *ForumHandler) AdminDeleteThread(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.forumService.AdminDeleteThread(c.Request.Context(), actorID, id); err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// AdminDeleteComment DELETE /api/v1/admin/comments/:id
+func (h *ForumHandler) AdminDeleteComment(c *gin.Context) {
+	actorID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.forumService.AdminDeleteComment(c.Request.Context(), actorID, id); err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}

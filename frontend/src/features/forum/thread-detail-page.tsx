@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Eye, Flame, MessageCircle, Pencil, Send, Trash2, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, Eye, EyeOff, Flame, MessageCircle, Pencil, Send, ShieldX, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import {
+  deleteAdminCommentsId,
+  deleteAdminThreadsId,
   deleteCommentsId,
   deleteCommentsIdReactions,
   deleteThreadsId,
@@ -10,12 +12,15 @@ import {
   getThreadsId,
   getThreadsIdComments,
   patchThreadsId,
+  postAdminCommentsIdHide,
+  postAdminThreadsIdHide,
   postCommentsIdReactions,
   postCommentsIdReport,
   postThreadsThreadIdComments,
   postThreadsIdReactions,
   postThreadsIdReport,
 } from '@/api/generated/medFlowAPI'
+import { UserRole } from '@/api/generated'
 import type { CommentTree, Thread } from '@/api/generated'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +35,9 @@ export function ThreadDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const currentUserId = useAuthStore((s) => s.user?.id)
+  const role = useAuthStore((s) => s.user?.role)
+  const canModerate = role === UserRole.moderator || role === UserRole.admin
+  const isAdmin = role === UserRole.admin
 
   const [thread, setThread] = useState<Thread | null>(null)
   const [loading, setLoading] = useState(true)
@@ -208,6 +216,57 @@ export function ThreadDetailPage() {
     }
   }
 
+  // ==================== Модерация (moderator+/admin) ====================
+
+  async function hideThread() {
+    if (!id) return
+    const reason = window.prompt('Причина скрытия треда:')
+    if (!reason?.trim()) return
+    try {
+      const updated = await postAdminThreadsIdHide(id, { reason: reason.trim() })
+      setThread(updated)
+      toast.success('Тред скрыт')
+    } catch {
+      toast.error('Не удалось скрыть тред')
+    }
+  }
+
+  async function adminDeleteThread() {
+    if (!id) return
+    if (!window.confirm('Удалить тред безвозвратно как модератор/админ?')) return
+    try {
+      await deleteAdminThreadsId(id)
+      toast.success('Тред удалён')
+      navigate('/forum')
+    } catch {
+      toast.error('Не удалось удалить тред')
+    }
+  }
+
+  async function hideComment(commentId: string) {
+    const reason = window.prompt('Причина скрытия комментария:')
+    if (!reason?.trim()) return
+    try {
+      await postAdminCommentsIdHide(commentId, { reason: reason.trim() })
+      toast.success('Комментарий скрыт')
+      loadComments()
+    } catch {
+      toast.error('Не удалось скрыть комментарий')
+    }
+  }
+
+  async function adminDeleteComment(commentId: string) {
+    if (!window.confirm('Удалить комментарий безвозвратно как модератор/админ?')) return
+    try {
+      await deleteAdminCommentsId(commentId)
+      toast.success('Комментарий удалён')
+      loadComments()
+      setThread((t) => (t ? { ...t, comments_count: Math.max(0, (t.comments_count ?? 0) - 1) } : t))
+    } catch {
+      toast.error('Не удалось удалить комментарий')
+    }
+  }
+
   if (loading) {
     return (
       <div className="mx-auto flex max-w-2xl flex-col gap-4 p-6">
@@ -299,9 +358,27 @@ export function ThreadDetailPage() {
             <Eye className="size-4" /> {thread.views_count ?? 0}
           </span>
           {!isOwner && (
-            <button type="button" onClick={reportThread} className="ml-auto flex items-center gap-1.5 hover:text-destructive">
+            <button
+              type="button"
+              onClick={reportThread}
+              className={cn('flex items-center gap-1.5 hover:text-destructive', !canModerate && 'ml-auto')}
+            >
               <TriangleAlert className="size-4" /> Пожаловаться
             </button>
+          )}
+          {canModerate && (
+            <div className="ml-auto flex items-center gap-3">
+              {!thread.hidden_at && (
+                <button type="button" onClick={hideThread} className="flex items-center gap-1.5 hover:text-destructive">
+                  <EyeOff className="size-4" /> Скрыть
+                </button>
+              )}
+              {isAdmin && (
+                <button type="button" onClick={adminDeleteThread} className="flex items-center gap-1.5 hover:text-destructive">
+                  <ShieldX className="size-4" /> Удалить (админ)
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -348,6 +425,10 @@ export function ThreadDetailPage() {
                   onReply={submitReply}
                   onDelete={deleteComment}
                   onReport={reportComment}
+                  canModerate={canModerate}
+                  isAdmin={isAdmin}
+                  onHide={hideComment}
+                  onAdminDelete={adminDeleteComment}
                 />
                 {c.replies?.map((r) => (
                   <CommentItem
@@ -359,6 +440,10 @@ export function ThreadDetailPage() {
                     onReply={submitReply}
                     onDelete={deleteComment}
                     onReport={reportComment}
+                    canModerate={canModerate}
+                    isAdmin={isAdmin}
+                    onHide={hideComment}
+                    onAdminDelete={adminDeleteComment}
                     nested
                   />
                 ))}

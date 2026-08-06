@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# Test artifacts (сгенерированы npm run test / test:e2e / test:report)
+vitest-results.json
+e2e-results.json
+playwright-report/
+test-results/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

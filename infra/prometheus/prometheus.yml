@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: medflow-backend
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["backend:8080"]
+
+  # Pushgateway - принимает результаты разовых прогонов (тесты), см.
+  # frontend/scripts/push-test-metrics.mjs. honor_labels: true - иначе
+  # Prometheus перезаписывает лейблы, присланные пушером, своими.
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]

@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"math"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -97,10 +99,15 @@ func RateLimiter(config RateLimiterConfig) gin.HandlerFunc {
 		l := localLimiter.addVisitor(ip)
 
 		if !l.Allow() {
+			retryAfter := int(math.Ceil(1 / float64(l.Limit())))
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			c.Header("Retry-After", strconv.Itoa(retryAfter))
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 				"error": map[string]interface{}{
 					"code":    "RATE_LIMITED",
-					"message": "too many requests, please try again later",
+					"message": "слишком много запросов, попробуйте позже",
 				},
 			})
 			return

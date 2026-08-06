@@ -234,3 +234,106 @@ func TestUserRepo_FindPublicByID_NotFound(t *testing.T) {
 		t.Fatalf("FindPublicByID() error = %v, want ErrUserNotFound", err)
 	}
 }
+
+func TestUserRepo_AdminList_FiltersByRoleAndBanned(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	admin := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", admin.ID) }()
+	if _, err := repo.ChangeRole(ctx, admin.ID, models.RoleAdmin); err != nil {
+		t.Fatalf("ChangeRole() error = %v", err)
+	}
+	regular := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", regular.ID) }()
+
+	role := models.RoleAdmin
+	items, _, err := repo.AdminList(ctx, models.AdminUserListFilter{Role: &role, Page: 1, Limit: 100})
+	if err != nil {
+		t.Fatalf("AdminList() error = %v", err)
+	}
+	// Не полагаемся на точный total/len - таблица users общая для всей сессии
+	// тестов (и может уже содержать других admin, напр. постоянный тестовый
+	// аккаунт admin@medflow.local) - проверяем только, что наш свежесозданный
+	// admin присутствует в выдаче, а обычный пользователь - нет.
+	found, foundRegular := false, false
+	for _, u := range items {
+		if u.ID == admin.ID {
+			found = true
+		}
+		if u.ID == regular.ID {
+			foundRegular = true
+		}
+	}
+	if !found {
+		t.Fatalf("AdminList(role=admin) = %v, want it to include %v", items, admin.ID)
+	}
+	if foundRegular {
+		t.Fatalf("AdminList(role=admin) = %v, must not include non-admin user %v", items, regular.ID)
+	}
+}
+
+func TestUserRepo_ChangeRole(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	user := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID) }()
+
+	updated, err := repo.ChangeRole(ctx, user.ID, models.RoleModerator)
+	if err != nil {
+		t.Fatalf("ChangeRole() error = %v", err)
+	}
+	if updated.Role != models.RoleModerator {
+		t.Errorf("Role = %v, want moderator", updated.Role)
+	}
+}
+
+func TestUserRepo_ChangeRole_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+
+	_, err := repo.ChangeRole(context.Background(), uuid.New(), models.RoleModerator)
+	if err != models.ErrUserNotFound {
+		t.Fatalf("ChangeRole() error = %v, want ErrUserNotFound", err)
+	}
+}
+
+func TestUserRepo_Ban_And_Unban(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	user := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID) }()
+	admin := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", admin.ID) }()
+
+	banned, err := repo.Ban(ctx, user.ID, admin.ID, "нарушение правил")
+	if err != nil {
+		t.Fatalf("Ban() error = %v", err)
+	}
+	if banned.BannedAt == nil || banned.BanReason == nil || *banned.BanReason != "нарушение правил" {
+		t.Fatalf("Ban() result = %+v, want banned with reason", banned)
+	}
+	if banned.BannedBy == nil || *banned.BannedBy != admin.ID {
+		t.Errorf("BannedBy = %v, want %v", banned.BannedBy, admin.ID)
+	}
+
+	unbanned, err := repo.Unban(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("Unban() error = %v", err)
+	}
+	if unbanned.BannedAt != nil || unbanned.BanReason != nil || unbanned.BannedBy != nil {
+		t.Fatalf("Unban() result = %+v, want all ban fields cleared", unbanned)
+	}
+}
+
+func TestUserRepo_Ban_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+
+	_, err := repo.Ban(context.Background(), uuid.New(), uuid.New(), "reason")
+	if err != models.ErrUserNotFound {
+		t.Fatalf("Ban() error = %v, want ErrUserNotFound", err)
+	}
+}

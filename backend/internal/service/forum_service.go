@@ -22,6 +22,8 @@ type ForumService struct {
 	commentRepo  CommentRepository
 	reactionRepo ReactionRepository
 	reportRepo   ReportRepository
+	auditLogRepo AuditLogRepository
+	pushNotifier PushNotifier
 }
 
 func NewForumService(
@@ -29,12 +31,16 @@ func NewForumService(
 	commentRepo CommentRepository,
 	reactionRepo ReactionRepository,
 	reportRepo ReportRepository,
+	auditLogRepo AuditLogRepository,
+	pushNotifier PushNotifier,
 ) *ForumService {
 	return &ForumService{
 		threadRepo:   threadRepo,
 		commentRepo:  commentRepo,
 		reactionRepo: reactionRepo,
 		reportRepo:   reportRepo,
+		auditLogRepo: auditLogRepo,
+		pushNotifier: pushNotifier,
 	}
 }
 
@@ -147,18 +153,20 @@ func (s *ForumService) Report(ctx context.Context, reporterID uuid.UUID, targetT
 }
 
 func (s *ForumService) CreateComment(ctx context.Context, threadID, authorID uuid.UUID, req dto.CreateCommentRequest) (*dto.Comment, error) {
-	if _, err := s.threadRepo.FindByID(ctx, threadID); err != nil {
+	thread, err := s.threadRepo.FindByID(ctx, threadID)
+	if err != nil {
 		return nil, s.mapThreadErr(err)
 	}
 
 	var parentID *uuid.UUID
+	var parent *models.Comment
 	depth := 0
 	if req.ParentID != nil && *req.ParentID != "" {
 		parsedParentID, err := uuid.Parse(*req.ParentID)
 		if err != nil {
 			return nil, ErrParentCommentNotFound
 		}
-		parent, err := s.commentRepo.FindByID(ctx, parsedParentID)
+		parent, err = s.commentRepo.FindByID(ctx, parsedParentID)
 		if err != nil || parent.ThreadID != threadID {
 			return nil, ErrParentCommentNotFound
 		}
@@ -177,8 +185,25 @@ func (s *ForumService) CreateComment(ctx context.Context, threadID, authorID uui
 	if err != nil {
 		return nil, err
 	}
+	s.notifyReply(ctx, authorID, thread, parent)
 	out := dto.ToComment(comment)
 	return &out, nil
+}
+
+// notifyReply - лучшее старание: push-уведомление не должно ронять уже
+// созданный комментарий. Ответ на комментарий уведомляет автора комментария
+// (comment_reply), топ-левел ответ в треде - автора треда (thread_reply);
+// себя не уведомляем.
+func (s *ForumService) notifyReply(ctx context.Context, authorID uuid.UUID, thread *models.Thread, parent *models.Comment) {
+	if parent != nil {
+		if parent.Author.ID != authorID {
+			_ = s.pushNotifier.Notify(ctx, parent.Author.ID, models.NotificationCommentReply, "Новый ответ", thread.Author.Nickname+" ответил(а) на ваш комментарий")
+		}
+		return
+	}
+	if thread.Author.ID != authorID {
+		_ = s.pushNotifier.Notify(ctx, thread.Author.ID, models.NotificationThreadReply, "Новый ответ в теме", "Кто-то ответил в теме «"+thread.Title+"»")
+	}
 }
 
 func (s *ForumService) ListComments(ctx context.Context, threadID uuid.UUID, page, limit int) (*dto.Pagination, []dto.CommentTree, error) {
@@ -232,6 +257,56 @@ func (s *ForumService) DeleteComment(ctx context.Context, id, userID uuid.UUID) 
 		return ErrForbidden
 	}
 	return s.mapCommentErr(s.commentRepo.SoftDelete(ctx, id, comment.ThreadID))
+}
+
+// ==================== ADMIN (moderator+/admin) ====================
+
+func (s *ForumService) AdminHideThread(ctx context.Context, actorID, id uuid.UUID, reason string) (*dto.Thread, error) {
+	hidden, err := s.threadRepo.Hide(ctx, id, actorID, reason)
+	if err != nil {
+		return nil, s.mapThreadErr(err)
+	}
+	s.writeAudit(ctx, actorID, models.AuditThreadHide, "thread", id, &reason)
+	out := dto.ToThread(hidden)
+	return &out, nil
+}
+
+func (s *ForumService) AdminHideComment(ctx context.Context, actorID, id uuid.UUID, reason string) (*dto.Comment, error) {
+	hidden, err := s.commentRepo.Hide(ctx, id, actorID, reason)
+	if err != nil {
+		return nil, s.mapCommentErr(err)
+	}
+	s.writeAudit(ctx, actorID, models.AuditCommentHide, "comment", id, &reason)
+	out := dto.ToComment(hidden)
+	return &out, nil
+}
+
+// AdminDeleteThread - в отличие от DeleteThread, без проверки авторства
+// (модератор/админ вправе удалить чужой тред).
+func (s *ForumService) AdminDeleteThread(ctx context.Context, actorID, id uuid.UUID) error {
+	if err := s.mapThreadErr(s.threadRepo.SoftDelete(ctx, id)); err != nil {
+		return err
+	}
+	s.writeAudit(ctx, actorID, models.AuditThreadDelete, "thread", id, nil)
+	return nil
+}
+
+func (s *ForumService) AdminDeleteComment(ctx context.Context, actorID, id uuid.UUID) error {
+	comment, err := s.commentRepo.FindByID(ctx, id)
+	if err != nil {
+		return s.mapCommentErr(err)
+	}
+	if err := s.mapCommentErr(s.commentRepo.SoftDelete(ctx, id, comment.ThreadID)); err != nil {
+		return err
+	}
+	s.writeAudit(ctx, actorID, models.AuditCommentDelete, "comment", id, nil)
+	return nil
+}
+
+// writeAudit - лучшее старание: сбой записи аудит-лога не должен проваливать
+// уже выполненное модераторское действие.
+func (s *ForumService) writeAudit(ctx context.Context, actorID uuid.UUID, action models.AuditAction, targetType string, targetID uuid.UUID, reason *string) {
+	_ = s.auditLogRepo.Create(ctx, &models.AuditLog{ActorID: actorID, Action: action, TargetType: &targetType, TargetID: &targetID, Reason: reason})
 }
 
 func (s *ForumService) mapThreadErr(err error) error {

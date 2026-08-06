@@ -118,6 +118,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       S3_ENDPOINT: minio:9000
+      # presigned-ссылки (скачивание PDF, ответ /upload) уходят клиенту в
+      # браузер - тот не резолвит внутреннее docker-имя "minio", поэтому
+      # подписываются под порт MinIO, проброшенный на хост (см. MINIO_API_PORT
+      # в .env). До появления публичного домена/прода это localhost.
+      S3_PUBLIC_ENDPOINT: localhost:${MINIO_API_PORT:-9000}
       SMTP_HOST: mailhog
       MAILHOG_SMTP_PORT: "1025"
     depends_on:
@@ -174,6 +179,9 @@ services:
       args:
         VITE_API_URL: /api/v1
         VITE_USE_MOCKS: "false"
+        # Публичный VAPID-ключ не секрет - тот же, что VAPID_PUBLIC_KEY у
+        # backend/worker (см. .env), встраивается в бандл на этапе сборки.
+        VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
     container_name: medflow_frontend
     restart: unless-stopped
     networks:
@@ -236,12 +244,61 @@ services:
     networks:
       - medflow-network
 
+  # --- профиль "monitoring": `docker compose --profile monitoring up -d` ---
+  # Prometheus скрейпит backend:8080/metrics и pushgateway (разовые метрики
+  # тест-прогонов, см. frontend/scripts/push-test-metrics.mjs). Grafana
+  # поднимается с уже провижененным датасорсом и дашбордом - открыл и сразу
+  # видно, без ручной настройки.
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: medflow_prometheus
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - medflow-network
+
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: medflow_pushgateway
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    ports:
+      - "${PUSHGATEWAY_PORT:-9091}:9091"
+    networks:
+      - medflow-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: medflow_grafana
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - medflow-network
+
 volumes:
   postgres_data:
   redis_data:
   minio_data:
   caddy_data:
   ollama_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   medflow-network:

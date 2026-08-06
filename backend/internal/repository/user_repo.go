@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -134,6 +135,110 @@ func (r *UserRepo) FindPublicByID(ctx context.Context, id uuid.UUID) (*models.Pu
 		return nil, err
 	}
 	return &pu, nil
+}
+
+const userSelectColumns = `
+	id, email, password_hash, nickname, role, university, course, faculty,
+	email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
+`
+
+// AdminList - для /admin/users: живые (не мягко удалённые) пользователи с
+// фильтрами по роли/бану/университету/поиску по nickname+email.
+func (r *UserRepo) AdminList(ctx context.Context, f models.AdminUserListFilter) ([]models.User, int, error) {
+	where := "deleted_at IS NULL"
+	var args []any
+	argN := 1
+
+	if f.Role != nil {
+		where += fmt.Sprintf(" AND role = $%d::user_role", argN)
+		args = append(args, string(*f.Role))
+		argN++
+	}
+	if f.Banned != nil {
+		if *f.Banned {
+			where += " AND banned_at IS NOT NULL"
+		} else {
+			where += " AND banned_at IS NULL"
+		}
+	}
+	if f.University != nil {
+		where += fmt.Sprintf(" AND university = $%d::university", argN)
+		args = append(args, string(*f.University))
+		argN++
+	}
+	if f.Q != nil && *f.Q != "" {
+		where += fmt.Sprintf(" AND (nickname ILIKE $%d OR email ILIKE $%d)", argN, argN)
+		args = append(args, "%"+*f.Q+"%")
+		argN++
+	}
+
+	var total int
+	if err := r.pool.QueryRow(ctx, "SELECT count(*) FROM users WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	limitArg, offsetArg := argN, argN+1
+	query := fmt.Sprintf(`SELECT %s FROM users WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d`,
+		userSelectColumns, where, limitArg, offsetArg)
+	dataArgs := append(append([]any{}, args...), f.Limit, (f.Page-1)*f.Limit)
+
+	rows, err := r.pool.Query(ctx, query, dataArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []models.User
+	for rows.Next() {
+		var u models.User
+		if err := rows.Scan(
+			&u.ID, &u.Email, &u.PasswordHash, &u.Nickname, &u.Role, &u.University, &u.Course, &u.Faculty,
+			&u.EmailVerifiedAt, &u.BannedAt, &u.BanReason, &u.BannedBy, &u.DeletedAt, &u.CreatedAt, &u.UpdatedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, u)
+	}
+	return out, total, rows.Err()
+}
+
+func (r *UserRepo) ChangeRole(ctx context.Context, id uuid.UUID, role models.UserRole) (*models.User, error) {
+	cmd, err := r.pool.Exec(ctx, `UPDATE users SET role = $2::user_role, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, string(role))
+	if err != nil {
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrUserNotFound
+	}
+	return r.FindByID(ctx, id)
+}
+
+func (r *UserRepo) Ban(ctx context.Context, id, bannedBy uuid.UUID, reason string) (*models.User, error) {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE users SET banned_at = now(), ban_reason = $2, banned_by = $3, updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id, reason, bannedBy)
+	if err != nil {
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrUserNotFound
+	}
+	return r.FindByID(ctx, id)
+}
+
+func (r *UserRepo) Unban(ctx context.Context, id uuid.UUID) (*models.User, error) {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE users SET banned_at = NULL, ban_reason = NULL, banned_by = NULL, updated_at = now()
+		WHERE id = $1 AND deleted_at IS NULL
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrUserNotFound
+	}
+	return r.FindByID(ctx, id)
 }
 
 func (r *UserRepo) scanUser(ctx context.Context, query string, args ...any) (*models.User, error) {

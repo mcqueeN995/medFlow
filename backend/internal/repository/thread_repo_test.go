@@ -179,3 +179,45 @@ func TestThreadRepo_List_SortPopular(t *testing.T) {
 	}
 	_ = quiet
 }
+
+func TestThreadRepo_Hide(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	moderator := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, repo, author.ID, "spam thread", nil)
+
+	hidden, err := repo.Hide(ctx, thread.ID, moderator.ID, "спам")
+	if err != nil {
+		t.Fatalf("Hide() error = %v", err)
+	}
+	if hidden.HiddenAt == nil {
+		t.Fatal("HiddenAt = nil, want set")
+	}
+	if hidden.HiddenBy == nil || *hidden.HiddenBy != moderator.ID {
+		t.Errorf("HiddenBy = %v, want %v", hidden.HiddenBy, moderator.ID)
+	}
+	if hidden.HiddenReason == nil || *hidden.HiddenReason != "спам" {
+		t.Errorf("HiddenReason = %v, want спам", hidden.HiddenReason)
+	}
+
+	// скрытый тред остаётся доступным по прямому FindByID (только List его прячет)
+	found, err := repo.FindByID(ctx, thread.ID)
+	if err != nil {
+		t.Fatalf("FindByID() after hide error = %v", err)
+	}
+	if found.HiddenAt == nil {
+		t.Error("FindByID() should still return the hidden thread with HiddenAt set")
+	}
+}
+
+func TestThreadRepo_Hide_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+
+	_, err := repo.Hide(context.Background(), uuid.New(), uuid.New(), "reason")
+	if err != models.ErrThreadNotFound {
+		t.Fatalf("Hide() error = %v, want ErrThreadNotFound", err)
+	}
+}

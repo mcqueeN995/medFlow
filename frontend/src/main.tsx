@@ -11,3 +11,10 @@ enableMocking().then(() => {
     </StrictMode>,
   )
 })
+
+// Регистрируем service worker только в прод-сборке - в dev с моками (MSW)
+// уже работает свой воркер на том же scope ("/"), регистрация обоих
+// одновременно приводит к конфликту.
+if (import.meta.env.PROD) {
+  import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }))
+}

@@ -151,3 +151,42 @@ func TestCommentRepo_ListByThread_TopLevelWithReplies(t *testing.T) {
 		t.Errorf("top2 replies = %d, want 0", len(byID[top2.ID]))
 	}
 }
+
+func TestCommentRepo_Hide(t *testing.T) {
+	pool := setupTestDB(t)
+	threadRepo := NewThreadRepo(pool)
+	commentRepo := NewCommentRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	moderator := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, threadRepo, author.ID, "thread with a bad comment", nil)
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "spam comment")
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	cleanupComment(t, pool, comment.ID)
+
+	hidden, err := commentRepo.Hide(ctx, comment.ID, moderator.ID, "спам")
+	if err != nil {
+		t.Fatalf("Hide() error = %v", err)
+	}
+	if hidden.HiddenAt == nil {
+		t.Fatal("HiddenAt = nil, want set")
+	}
+	if hidden.HiddenBy == nil || *hidden.HiddenBy != moderator.ID {
+		t.Errorf("HiddenBy = %v, want %v", hidden.HiddenBy, moderator.ID)
+	}
+	if hidden.HiddenReason == nil || *hidden.HiddenReason != "спам" {
+		t.Errorf("HiddenReason = %v, want спам", hidden.HiddenReason)
+	}
+}
+
+func TestCommentRepo_Hide_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewCommentRepo(pool)
+
+	_, err := repo.Hide(context.Background(), uuid.New(), uuid.New(), "reason")
+	if err != models.ErrCommentNotFound {
+		t.Fatalf("Hide() error = %v, want ErrCommentNotFound", err)
+	}
+}

@@ -20,7 +20,7 @@ func NewCommentRepo(pool *pgxpool.Pool) *CommentRepo {
 
 const commentSelectColumns = `
 	c.id, c.thread_id, c.parent_id, c.content, c.depth, c.likes_count,
-	c.hidden_at, c.deleted_at, c.created_at, c.updated_at,
+	c.hidden_at, c.hidden_by, c.hidden_reason, c.deleted_at, c.created_at, c.updated_at,
 	u.id, u.nickname, u.university, u.course, u.faculty, u.created_at,
 	(SELECT count(*) FROM threads t2 WHERE t2.author_id = u.id AND t2.deleted_at IS NULL)
 `
@@ -29,7 +29,7 @@ func (r *CommentRepo) scanComment(row pgx.Row) (*models.Comment, error) {
 	var c models.Comment
 	err := row.Scan(
 		&c.ID, &c.ThreadID, &c.ParentID, &c.Content, &c.Depth, &c.LikesCount,
-		&c.HiddenAt, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
+		&c.HiddenAt, &c.HiddenBy, &c.HiddenReason, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 		&c.Author.ID, &c.Author.Nickname, &c.Author.University, &c.Author.Course, &c.Author.Faculty, &c.Author.CreatedAt,
 		&c.Author.ThreadsCount,
 	)
@@ -82,6 +82,19 @@ func (r *CommentRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Comme
 
 func (r *CommentRepo) Update(ctx context.Context, id uuid.UUID, content string) (*models.Comment, error) {
 	cmd, err := r.pool.Exec(ctx, `UPDATE comments SET content = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, content)
+	if err != nil {
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrCommentNotFound
+	}
+	return r.FindByID(ctx, id)
+}
+
+func (r *CommentRepo) Hide(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error) {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE comments SET hidden_at = now(), hidden_by = $2, hidden_reason = $3 WHERE id = $1 AND deleted_at IS NULL
+	`, id, hiddenBy, reason)
 	if err != nil {
 		return nil, err
 	}

@@ -56,24 +56,28 @@ type Thread struct {
 	LikesCount    int
 	CommentsCount int
 	HiddenAt      *time.Time
+	HiddenBy      *uuid.UUID
+	HiddenReason  *string
 	DeletedAt     *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
 
 type Comment struct {
-	ID         uuid.UUID
-	ThreadID   uuid.UUID
-	ParentID   *uuid.UUID
-	Author     PublicUser
-	Content    string
-	Depth      int
-	LikesCount int
-	HiddenAt   *time.Time
-	DeletedAt  *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Replies    []Comment
+	ID           uuid.UUID
+	ThreadID     uuid.UUID
+	ParentID     *uuid.UUID
+	Author       PublicUser
+	Content      string
+	Depth        int
+	LikesCount   int
+	HiddenAt     *time.Time
+	HiddenBy     *uuid.UUID
+	HiddenReason *string
+	DeletedAt    *time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Replies      []Comment
 }
 
 type Reaction struct {
@@ -94,11 +98,21 @@ type ThreadListFilter struct {
 }
 
 type Report struct {
-	ID         uuid.UUID
-	ReporterID uuid.UUID
-	TargetType string
-	TargetID   uuid.UUID
-	Reason     string
-	Status     ReportStatus
-	CreatedAt  time.Time
+	ID             uuid.UUID
+	ReporterID     uuid.UUID
+	TargetType     string
+	TargetID       uuid.UUID
+	Reason         string
+	Status         ReportStatus
+	ReviewedBy     *uuid.UUID
+	ReviewedAt     *time.Time
+	ResolutionNote *string
+	CreatedAt      time.Time
+}
+
+type ReportListFilter struct {
+	Status     *ReportStatus
+	TargetType *string
+	Page       int
+	Limit      int
 }

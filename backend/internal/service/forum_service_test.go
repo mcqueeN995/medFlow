@@ -23,7 +23,7 @@ func setupTestForumService(threadRepo *mockThreadRepository, commentRepo *mockCo
 	if reportRepo == nil {
 		reportRepo = &mockReportRepository{}
 	}
-	return NewForumService(threadRepo, commentRepo, reactionRepo, reportRepo)
+	return NewForumService(threadRepo, commentRepo, reactionRepo, reportRepo, &mockAuditLogRepository{}, &mockPushNotifier{})
 }
 
 func TestForumService_CreateThread_Success(t *testing.T) {
@@ -246,6 +246,64 @@ func TestForumService_CreateComment_ParentFromDifferentThread(t *testing.T) {
 	}
 }
 
+func TestForumService_CreateComment_TopLevel_NotifiesThreadAuthor(t *testing.T) {
+	threadID := uuid.New()
+	threadAuthorID := uuid.New()
+	commentAuthorID := uuid.New()
+
+	threadRepo := &mockThreadRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Thread, error) {
+			return &models.Thread{ID: threadID, Title: "тема", Author: models.PublicUser{ID: threadAuthorID}}, nil
+		},
+	}
+	commentRepo := &mockCommentRepository{
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
+		},
+	}
+	notifier := &mockPushNotifier{}
+	svc := NewForumService(threadRepo, commentRepo, &mockReactionRepository{}, &mockReportRepository{}, &mockAuditLogRepository{}, notifier)
+
+	_, err := svc.CreateComment(context.Background(), threadID, commentAuthorID, dto.CreateCommentRequest{Content: "первый!"})
+	if err != nil {
+		t.Fatalf("CreateComment() error = %v", err)
+	}
+	if len(notifier.calls) != 1 || notifier.calls[0] != models.NotificationThreadReply {
+		t.Fatalf("notifier.calls = %v, want [thread_reply]", notifier.calls)
+	}
+}
+
+func TestForumService_CreateComment_Reply_NotifiesParentAuthorNotSelf(t *testing.T) {
+	threadID := uuid.New()
+	parentID := uuid.New()
+	parentIDStr := parentID.String()
+	authorID := uuid.New() // отвечает сам себе на свой же комментарий
+
+	threadRepo := &mockThreadRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Thread, error) {
+			return &models.Thread{ID: threadID, Author: models.PublicUser{ID: uuid.New()}}, nil
+		},
+	}
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return &models.Comment{ID: parentID, ThreadID: threadID, Depth: 0, Author: models.PublicUser{ID: authorID}}, nil
+		},
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, ParentID: parentID, Depth: depth, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
+		},
+	}
+	notifier := &mockPushNotifier{}
+	svc := NewForumService(threadRepo, commentRepo, &mockReactionRepository{}, &mockReportRepository{}, &mockAuditLogRepository{}, notifier)
+
+	_, err := svc.CreateComment(context.Background(), threadID, authorID, dto.CreateCommentRequest{Content: "ответ самому себе", ParentID: &parentIDStr})
+	if err != nil {
+		t.Fatalf("CreateComment() error = %v", err)
+	}
+	if len(notifier.calls) != 0 {
+		t.Fatalf("notifier.calls = %v, want no notification for self-reply", notifier.calls)
+	}
+}
+
 func TestForumService_UpdateComment_ForbiddenForNonAuthor(t *testing.T) {
 	commentID := uuid.New()
 	authorID := uuid.New()
@@ -299,5 +357,104 @@ func TestForumService_ListThreads_ClampsPageAndLimit(t *testing.T) {
 	}
 	if pagination.Page != 1 || pagination.Limit != 20 {
 		t.Errorf("pagination = %+v, want Page=1 Limit=20", pagination)
+	}
+}
+
+func TestForumService_AdminHideThread_WritesAuditLog(t *testing.T) {
+	actorID, threadID := uuid.New(), uuid.New()
+	var hiddenBy uuid.UUID
+	var hiddenReason string
+	threadRepo := &mockThreadRepository{
+		hideFn: func(ctx context.Context, id, by uuid.UUID, reason string) (*models.Thread, error) {
+			hiddenBy, hiddenReason = by, reason
+			return &models.Thread{ID: id, HiddenAt: nil}, nil
+		},
+	}
+	var auditEntry *models.AuditLog
+	auditRepo := &mockAuditLogRepository{
+		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
+	}
+	svc := NewForumService(threadRepo, &mockCommentRepository{}, &mockReactionRepository{}, &mockReportRepository{}, auditRepo, &mockPushNotifier{})
+
+	if _, err := svc.AdminHideThread(context.Background(), actorID, threadID, "спам"); err != nil {
+		t.Fatalf("AdminHideThread() error = %v", err)
+	}
+	if hiddenBy != actorID || hiddenReason != "спам" {
+		t.Errorf("Hide() called with by=%v reason=%q", hiddenBy, hiddenReason)
+	}
+	if auditEntry == nil || auditEntry.Action != models.AuditThreadHide || auditEntry.ActorID != actorID {
+		t.Fatalf("audit log entry = %+v, want AuditThreadHide by %v", auditEntry, actorID)
+	}
+}
+
+func TestForumService_AdminDeleteThread_BypassesOwnership(t *testing.T) {
+	actorID, threadID := uuid.New(), uuid.New()
+	softDeleteCalled := false
+	threadRepo := &mockThreadRepository{
+		softDeleteFn: func(ctx context.Context, id uuid.UUID) error { softDeleteCalled = true; return nil },
+	}
+	var auditEntry *models.AuditLog
+	auditRepo := &mockAuditLogRepository{
+		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
+	}
+	svc := NewForumService(threadRepo, &mockCommentRepository{}, &mockReactionRepository{}, &mockReportRepository{}, auditRepo, &mockPushNotifier{})
+
+	// В отличие от DeleteThread, AdminDeleteThread не проверяет FindByID/авторство -
+	// удаляет напрямую по id, даже если "актёр" не автор.
+	if err := svc.AdminDeleteThread(context.Background(), actorID, threadID); err != nil {
+		t.Fatalf("AdminDeleteThread() error = %v", err)
+	}
+	if !softDeleteCalled {
+		t.Error("expected SoftDelete to be called")
+	}
+	if auditEntry == nil || auditEntry.Action != models.AuditThreadDelete {
+		t.Fatalf("audit log entry = %+v, want AuditThreadDelete", auditEntry)
+	}
+}
+
+func TestForumService_AdminHideComment_WritesAuditLog(t *testing.T) {
+	actorID, commentID := uuid.New(), uuid.New()
+	commentRepo := &mockCommentRepository{
+		hideFn: func(ctx context.Context, id, by uuid.UUID, reason string) (*models.Comment, error) {
+			return &models.Comment{ID: id}, nil
+		},
+	}
+	var auditEntry *models.AuditLog
+	auditRepo := &mockAuditLogRepository{
+		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
+	}
+	svc := NewForumService(&mockThreadRepository{}, commentRepo, &mockReactionRepository{}, &mockReportRepository{}, auditRepo, &mockPushNotifier{})
+
+	if _, err := svc.AdminHideComment(context.Background(), actorID, commentID, "спам"); err != nil {
+		t.Fatalf("AdminHideComment() error = %v", err)
+	}
+	if auditEntry == nil || auditEntry.Action != models.AuditCommentHide {
+		t.Fatalf("audit log entry = %+v, want AuditCommentHide", auditEntry)
+	}
+}
+
+func TestForumService_AdminDeleteComment_BypassesOwnership(t *testing.T) {
+	actorID, commentID, threadID := uuid.New(), uuid.New(), uuid.New()
+	softDeleteCalled := false
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return &models.Comment{ID: id, ThreadID: threadID, Author: models.PublicUser{ID: uuid.New()}}, nil
+		},
+		softDeleteFn: func(ctx context.Context, id, gotThreadID uuid.UUID) error { softDeleteCalled = true; return nil },
+	}
+	var auditEntry *models.AuditLog
+	auditRepo := &mockAuditLogRepository{
+		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
+	}
+	svc := NewForumService(&mockThreadRepository{}, commentRepo, &mockReactionRepository{}, &mockReportRepository{}, auditRepo, &mockPushNotifier{})
+
+	if err := svc.AdminDeleteComment(context.Background(), actorID, commentID); err != nil {
+		t.Fatalf("AdminDeleteComment() error = %v", err)
+	}
+	if !softDeleteCalled {
+		t.Error("expected SoftDelete to be called even though actor is not the comment author")
+	}
+	if auditEntry == nil || auditEntry.Action != models.AuditCommentDelete {
+		t.Fatalf("audit log entry = %+v, want AuditCommentDelete", auditEntry)
 	}
 }

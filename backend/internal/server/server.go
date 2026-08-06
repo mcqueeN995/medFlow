@@ -14,6 +14,9 @@ import (
 	"github.com/medflow/backend/internal/config"
 	"github.com/medflow/backend/internal/database"
 	"github.com/medflow/backend/internal/handler"
+	"github.com/medflow/backend/internal/pkg/llm"
+	"github.com/medflow/backend/internal/pkg/queue"
+	"github.com/medflow/backend/internal/pkg/storage"
 	"github.com/medflow/backend/internal/repository"
 	"github.com/medflow/backend/internal/service"
 )
@@ -23,6 +26,7 @@ type Server struct {
 	http   *http.Server
 	pool   *pgxpool.Pool
 	router http.Handler
+	queue  *queue.Client
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -32,23 +36,62 @@ func New(cfg *config.Config) (*Server, error) {
 	}
 	slog.Info("connected to postgres")
 
+	s3Client, err := storage.New(cfg.S3)
+	if err != nil {
+		return nil, fmt.Errorf("connect to s3: %w", err)
+	}
+
+	llmProvider, err := llm.New(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("init llm provider: %w", err)
+	}
+
+	redisAddr := fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port)
+	queueClient := queue.New(redisAddr)
+
 	userRepo := repository.NewUserRepo(pool)
 	tokenRepo := repository.NewTokenRepo(pool)
 	threadRepo := repository.NewThreadRepo(pool)
 	commentRepo := repository.NewCommentRepo(pool)
 	reactionRepo := repository.NewReactionRepo(pool)
 	reportRepo := repository.NewReportRepo(pool)
+	textbookRepo := repository.NewTextbookRepo(pool)
+	uploadRepo := repository.NewUploadRepo(pool)
+	cardTaskRepo := repository.NewCardTaskRepo(pool)
+	cardRepo := repository.NewCardRepo(pool)
+	cardProgressRepo := repository.NewCardProgressRepo(pool)
+	textbookChunkRepo := repository.NewTextbookChunkRepo(pool)
+	poiRepo := repository.NewPOIRepo(pool)
+	auditLogRepo := repository.NewAuditLogRepo(pool)
+	adminStatsRepo := repository.NewAdminStatsRepo(pool)
+	pushRepo := repository.NewPushRepo(pool)
 
 	tokenService := service.NewTokenService(cfg)
 	authService := service.NewAuthService(userRepo, tokenRepo, tokenService, cfg)
-	forumService := service.NewForumService(threadRepo, commentRepo, reactionRepo, reportRepo)
-	userService := service.NewUserService(userRepo, tokenRepo)
+	pushSender := service.NewWebPushSender()
+	pushService := service.NewPushService(pushRepo, pushSender, cfg.VAPID)
+	forumService := service.NewForumService(threadRepo, commentRepo, reactionRepo, reportRepo, auditLogRepo, pushService)
+	userService := service.NewUserService(userRepo, tokenRepo, auditLogRepo)
+	libraryService := service.NewLibraryService(textbookRepo, uploadRepo, s3Client, auditLogRepo)
+	uploadService := service.NewUploadService(uploadRepo, s3Client)
+	cardService := service.NewCardService(
+		cardTaskRepo, cardRepo, cardProgressRepo, textbookChunkRepo, textbookRepo, uploadRepo, reportRepo,
+		s3Client, llmProvider, queueClient, pushService,
+	)
+	poiService := service.NewPOIService(poiRepo, auditLogRepo)
+	adminService := service.NewAdminService(reportRepo, auditLogRepo, adminStatsRepo)
 
 	authHandler := handler.NewAuthHandler(authService)
 	forumHandler := handler.NewForumHandler(forumService)
 	userHandler := handler.NewUserHandler(userService)
+	libraryHandler := handler.NewLibraryHandler(libraryService)
+	uploadHandler := handler.NewUploadHandler(uploadService)
+	cardHandler := handler.NewCardHandler(cardService)
+	poiHandler := handler.NewPOIHandler(poiService)
+	adminHandler := handler.NewAdminHandler(adminService)
+	pushHandler := handler.NewPushHandler(pushService)
 
-	router := SetupRouter(cfg, authHandler, forumHandler, userHandler)
+	router := SetupRouter(cfg, authHandler, forumHandler, userHandler, libraryHandler, uploadHandler, cardHandler, poiHandler, adminHandler, pushHandler)
 
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%s", cfg.App.Port),
@@ -63,6 +106,7 @@ func New(cfg *config.Config) (*Server, error) {
 		http:   httpServer,
 		pool:   pool,
 		router: router,
+		queue:  queueClient,
 	}, nil
 }
 
@@ -89,6 +133,10 @@ func (s *Server) Run() error {
 
 	if err := s.http.Shutdown(ctx); err != nil {
 		slog.Error("http shutdown error", "error", err)
+	}
+
+	if err := s.queue.Close(); err != nil {
+		slog.Error("queue client close error", "error", err)
 	}
 
 	// Закрываем пул БД

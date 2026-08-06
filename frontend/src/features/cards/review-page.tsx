@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, PartyPopper, ShieldAlert } from 'lucide-react'
+import { toast } from 'sonner'
 import { getCardsReview, postCardsIdRate } from '@/api/generated/medFlowAPI'
 import type { ReviewCard } from '@/api/generated'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 import { GRADE_LABELS } from '@/lib/sm2'
+import { enqueueReview } from '@/lib/review-queue'
 
 const GRADE_STYLES: Record<number, string> = {
   0: 'bg-destructive/10 text-destructive hover:bg-destructive/20',
@@ -31,7 +33,15 @@ export function ReviewPage() {
     if (!card?.card_id || rating) return
     setRating(true)
     try {
-      await postCardsIdRate(card.card_id, { grade: value })
+      try {
+        await postCardsIdRate(card.card_id, { grade: value })
+      } catch (err) {
+        if ((err as { response?: unknown }).response) {
+          toast.error('Не удалось сохранить оценку, попробуйте ещё раз')
+          return
+        }
+        await enqueueReview(card.card_id, value) // офлайн - оценка уйдёт при восстановлении связи
+      }
       setReviewedCount((c) => c + 1)
       setIndex((i) => i + 1)
       setRevealed(false)

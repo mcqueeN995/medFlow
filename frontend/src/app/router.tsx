@@ -1,24 +1,43 @@
+import { lazy, Suspense, type ComponentType } from 'react'
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import { AppShell } from '@/components/shared/app-shell'
 import { RequireAuthOutlet } from '@/components/shared/require-auth-outlet'
+import { RequireRoleOutlet } from '@/components/shared/require-role-outlet'
+import { Skeleton } from '@/components/ui/skeleton'
+import { UserRole } from '@/api/generated'
 import { LoginPage } from '@/features/auth/login-page'
 import { RegisterPage } from '@/features/auth/register-page'
-import { LibraryCatalogPage } from '@/features/library/catalog-page'
-import { TextbookDetailsPage } from '@/features/library/textbook-details-page'
-import { LibraryUploadPage } from '@/features/library/upload-page'
-import { NavigatorPage } from '@/features/navigator/navigator-page'
-import { CardsHomePage } from '@/features/cards/cards-home-page'
-import { CreateCardTaskPage } from '@/features/cards/create-task-page'
-import { TaskDetailPage } from '@/features/cards/task-detail-page'
-import { ReviewPage } from '@/features/cards/review-page'
-import { ForumFeedPage } from '@/features/forum/forum-feed-page'
-import { CreateThreadPage } from '@/features/forum/create-thread-page'
-import { ThreadDetailPage } from '@/features/forum/thread-detail-page'
-import { ProfilePage } from '@/features/profile/profile-page'
+import { TermsPage } from '@/features/auth/terms-page'
+import { PrivacyPage } from '@/features/auth/privacy-page'
+
+function PageFallback() {
+  return (
+    <div className="mx-auto flex max-w-xl flex-col gap-3 p-6">
+      <Skeleton className="h-8 w-48" />
+      <Skeleton className="h-64 rounded-2xl" />
+    </div>
+  )
+}
+
+// lazyPage - маршруты форума/карточек/админки/библиотеки тянут за собой
+// заметную часть общего бандла (988кБ единым чанком до code-splitting'а -
+// см. Lighthouse Performance). React.lazy разбивает их на отдельные чанки,
+// загружаемые по факту перехода на маршрут, а не все разом при первой
+// отрисовке приложения - без этого FCP/LCP на холодном старте были <90.
+function lazyPage(loader: () => Promise<{ default: ComponentType<Record<string, never>> }>) {
+  const LazyComponent = lazy(loader)
+  return (
+    <Suspense fallback={<PageFallback />}>
+      <LazyComponent />
+    </Suspense>
+  )
+}
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
+  { path: '/terms', element: <TermsPage /> },
+  { path: '/privacy', element: <PrivacyPage /> },
   {
     // AppShell больше не требует входа целиком — гость видит навигацию и
     // публичные разделы (библиотека, навигатор), см. роль guest в ТЗ.
@@ -29,7 +48,10 @@ export const router = createBrowserRouter([
       {
         path: 'library',
         children: [
-          { index: true, element: <LibraryCatalogPage /> },
+          {
+            index: true,
+            element: lazyPage(() => import('@/features/library/catalog-page').then((m) => ({ default: m.LibraryCatalogPage }))),
+          },
           {
             path: 'upload',
             element: (
@@ -38,9 +60,19 @@ export const router = createBrowserRouter([
                 description="Чтобы прикрепить свой PDF и подготовить из него карточки, войдите или зарегистрируйтесь."
               />
             ),
-            children: [{ index: true, element: <LibraryUploadPage /> }],
+            children: [
+              {
+                index: true,
+                element: lazyPage(() => import('@/features/library/upload-page').then((m) => ({ default: m.LibraryUploadPage }))),
+              },
+            ],
           },
-          { path: ':id', element: <TextbookDetailsPage /> },
+          {
+            path: ':id',
+            element: lazyPage(() =>
+              import('@/features/library/textbook-details-page').then((m) => ({ default: m.TextbookDetailsPage })),
+            ),
+          },
         ],
       },
       {
@@ -52,13 +84,28 @@ export const router = createBrowserRouter([
           />
         ),
         children: [
-          { index: true, element: <CardsHomePage /> },
-          { path: 'create', element: <CreateCardTaskPage /> },
-          { path: 'review', element: <ReviewPage /> },
-          { path: 'tasks/:id', element: <TaskDetailPage /> },
+          {
+            index: true,
+            element: lazyPage(() => import('@/features/cards/cards-home-page').then((m) => ({ default: m.CardsHomePage }))),
+          },
+          {
+            path: 'create',
+            element: lazyPage(() => import('@/features/cards/create-task-page').then((m) => ({ default: m.CreateCardTaskPage }))),
+          },
+          {
+            path: 'review',
+            element: lazyPage(() => import('@/features/cards/review-page').then((m) => ({ default: m.ReviewPage }))),
+          },
+          {
+            path: 'tasks/:id',
+            element: lazyPage(() => import('@/features/cards/task-detail-page').then((m) => ({ default: m.TaskDetailPage }))),
+          },
         ],
       },
-      { path: 'navigator', element: <NavigatorPage /> },
+      {
+        path: 'navigator',
+        element: lazyPage(() => import('@/features/navigator/navigator-page').then((m) => ({ default: m.NavigatorPage }))),
+      },
       {
         path: 'forum',
         // Форум целиком закрыт для гостя - в отличие от Library/Map, ни у
@@ -71,9 +118,18 @@ export const router = createBrowserRouter([
           />
         ),
         children: [
-          { index: true, element: <ForumFeedPage /> },
-          { path: 'create', element: <CreateThreadPage /> },
-          { path: ':id', element: <ThreadDetailPage /> },
+          {
+            index: true,
+            element: lazyPage(() => import('@/features/forum/forum-feed-page').then((m) => ({ default: m.ForumFeedPage }))),
+          },
+          {
+            path: 'create',
+            element: lazyPage(() => import('@/features/forum/create-thread-page').then((m) => ({ default: m.CreateThreadPage }))),
+          },
+          {
+            path: ':id',
+            element: lazyPage(() => import('@/features/forum/thread-detail-page').then((m) => ({ default: m.ThreadDetailPage }))),
+          },
         ],
       },
       {
@@ -81,7 +137,40 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuthOutlet title="Профиль" description="Войдите, чтобы посмотреть и отредактировать профиль." />
         ),
-        children: [{ index: true, element: <ProfilePage /> }],
+        children: [
+          {
+            index: true,
+            element: lazyPage(() => import('@/features/profile/profile-page').then((m) => ({ default: m.ProfilePage }))),
+          },
+        ],
+      },
+      {
+        path: 'admin',
+        element: <RequireRoleOutlet roles={[UserRole.moderator, UserRole.admin]} />,
+        children: [
+          {
+            element: lazyPage(() => import('@/features/admin/admin-layout').then((m) => ({ default: m.AdminLayout }))),
+            children: [
+              { index: true, element: <Navigate to="/admin/reports" replace /> },
+              {
+                path: 'reports',
+                element: lazyPage(() => import('@/features/admin/reports-page').then((m) => ({ default: m.AdminReportsPage }))),
+              },
+              {
+                path: 'users',
+                element: lazyPage(() => import('@/features/admin/users-page').then((m) => ({ default: m.AdminUsersPage }))),
+              },
+              {
+                path: 'stats',
+                element: lazyPage(() => import('@/features/admin/stats-page').then((m) => ({ default: m.AdminStatsPage }))),
+              },
+              {
+                path: 'audit-log',
+                element: lazyPage(() => import('@/features/admin/audit-log-page').then((m) => ({ default: m.AdminAuditLogPage }))),
+              },
+            ],
+          },
+        ],
       },
     ],
   },

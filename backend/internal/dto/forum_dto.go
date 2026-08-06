@@ -195,23 +195,34 @@ type ReportRequest struct {
 }
 
 type Report struct {
-	ID         string              `json:"id"`
-	ReporterID string              `json:"reporter_id"`
-	TargetType string              `json:"target_type"`
-	TargetID   string              `json:"target_id"`
-	Reason     string              `json:"reason"`
-	Status     models.ReportStatus `json:"status"`
-	CreatedAt  time.Time           `json:"created_at"`
+	ID             string              `json:"id"`
+	ReporterID     string              `json:"reporter_id"`
+	TargetType     string              `json:"target_type"`
+	TargetID       string              `json:"target_id"`
+	Reason         string              `json:"reason"`
+	Status         models.ReportStatus `json:"status"`
+	ReviewedBy     *string             `json:"reviewed_by,omitempty"`
+	ReviewedAt     *time.Time          `json:"reviewed_at,omitempty"`
+	ResolutionNote *string             `json:"resolution_note,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
 }
 
 func ToReport(r *models.Report) Report {
+	var reviewedBy *string
+	if r.ReviewedBy != nil {
+		s := r.ReviewedBy.String()
+		reviewedBy = &s
+	}
 	return Report{
-		ID:         r.ID.String(),
-		ReporterID: r.ReporterID.String(),
-		TargetType: r.TargetType,
-		TargetID:   r.TargetID.String(),
-		Reason:     r.Reason,
-		Status:     r.Status,
-		CreatedAt:  r.CreatedAt,
+		ID:             r.ID.String(),
+		ReporterID:     r.ReporterID.String(),
+		TargetType:     r.TargetType,
+		TargetID:       r.TargetID.String(),
+		Reason:         r.Reason,
+		Status:         r.Status,
+		ReviewedBy:     reviewedBy,
+		ReviewedAt:     r.ReviewedAt,
+		ResolutionNote: r.ResolutionNote,
+		CreatedAt:      r.CreatedAt,
 	}
 }

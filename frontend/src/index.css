@@ -108,7 +108,7 @@
   тёмный, как в светлой теме.
 */
 .dim {
-  --background: oklch(0.9 0.035 228);
+  --background: #dbeaff;
   --foreground: oklch(0.24 0.05 240);
 
   --card: oklch(0.96 0.015 226);
@@ -117,7 +117,7 @@
   --popover: oklch(0.96 0.015 226);
   --popover-foreground: oklch(0.24 0.05 240);
 
-  --primary: oklch(0.35 0.07 240);
+  --primary: #07608c;
   --primary-foreground: oklch(0.98 0.01 224);
 
   --secondary: oklch(0.86 0.03 226);
@@ -126,30 +126,30 @@
   --muted: oklch(0.86 0.03 226);
   --muted-foreground: oklch(0.42 0.04 235);
 
-  --accent: oklch(0.55 0.09 205);
-  --accent-foreground: oklch(0.98 0.01 224);
+  --accent: #00c3d0;
+  --accent-foreground: oklch(0.2 0.02 224);
 
   --destructive: oklch(0.56 0.19 25);
   --destructive-foreground: oklch(0.98 0.01 224);
 
   --border: oklch(0.8 0.025 225);
   --input: oklch(0.8 0.025 225);
-  --ring: oklch(0.55 0.09 205);
+  --ring: #00c3d0;
 
-  --chart-1: oklch(0.55 0.09 205);
-  --chart-2: oklch(0.35 0.07 240);
+  --chart-1: #00c3d0;
+  --chart-2: #07608c;
   --chart-3: oklch(0.68 0.06 200);
   --chart-4: oklch(0.48 0.12 25);
   --chart-5: oklch(0.62 0.1 90);
 
   --sidebar: oklch(0.93 0.02 227);
   --sidebar-foreground: oklch(0.24 0.05 240);
-  --sidebar-primary: oklch(0.35 0.07 240);
+  --sidebar-primary: #07608c;
   --sidebar-primary-foreground: oklch(0.98 0.01 224);
-  --sidebar-accent: oklch(0.55 0.09 205);
-  --sidebar-accent-foreground: oklch(0.98 0.01 224);
+  --sidebar-accent: #00c3d0;
+  --sidebar-accent-foreground: oklch(0.2 0.02 224);
   --sidebar-border: oklch(0.8 0.025 225);
-  --sidebar-ring: oklch(0.55 0.09 205);
+  --sidebar-ring: #00c3d0;
 }
 
 @theme inline {
@@ -204,5 +204,11 @@
     @apply bg-background text-foreground font-sans;
     background-image: radial-gradient(1200px 600px at 15% -10%, color-mix(in oklch, var(--accent) 12%, transparent), transparent);
     background-attachment: fixed;
+  }
+
+  /* "Полусветлая" (dim) тема - собственный фоновый градиент по референсу
+     дизайна (DBEAFF -> B7E6FC), вместо общей радиальной подсветки акцентом. */
+  .dim body {
+    background-image: linear-gradient(135deg, #dbeaff 0%, #b7e6fc 100%);
   }
 }

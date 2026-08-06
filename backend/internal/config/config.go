@@ -18,6 +18,7 @@ type Config struct {
 	Email    EmailConfig
 	LLM      LLMConfig
 	Ollama   OllamaConfig
+	VAPID    VAPIDConfig
 }
 
 type AppConfig struct {
@@ -40,12 +41,20 @@ type RedisConfig struct {
 }
 
 type S3Config struct {
-	Endpoint   string
-	AccessKey  string
-	SecretKey  string
-	BucketName string
-	Region     string
-	UseSSL     bool
+	// Endpoint - адрес S3/MinIO внутри docker-сети (например, minio:9000),
+	// используется бэкендом для записи файлов (PutObject).
+	Endpoint string
+	// PublicEndpoint - адрес, по которому S3/MinIO реально достижим для
+	// браузера клиента (в dev - localhost:9000, порт MinIO проброшен на хост;
+	// в проде - домен/CDN перед MinIO). Presigned-ссылки (download/upload)
+	// подписываются под этот хост - иначе ссылка с internal-хостом minio:9000
+	// была бы нерабочей для внешнего клиента, у которого такого DNS-имени нет.
+	PublicEndpoint string
+	AccessKey      string
+	SecretKey      string
+	BucketName     string
+	Region         string
+	UseSSL         bool
 }
 
 type JWTConfig struct {
@@ -76,6 +85,13 @@ type OllamaConfig struct {
 	Host            string
 	GenerationModel string
 	EmbeddingModel  string
+}
+
+// VAPIDConfig — ключевая пара для подписи Web Push уведомлений.
+type VAPIDConfig struct {
+	PublicKey  string
+	PrivateKey string
+	Subject    string
 }
 
 // withDefault возвращает значение переменной окружения или def, если она не задана.
@@ -126,12 +142,13 @@ func Load() (*Config, error) {
 			Port: viper.GetString("REDIS_PORT"),
 		},
 		S3: S3Config{
-			Endpoint:   withDefault("S3_ENDPOINT", fmt.Sprintf("localhost:%s", viper.GetString("MINIO_API_PORT"))),
-			AccessKey:  viper.GetString("MINIO_ROOT_USER"),
-			SecretKey:  viper.GetString("MINIO_ROOT_PASSWORD"),
-			BucketName: viper.GetString("S3_BUCKET_NAME"),
-			Region:     viper.GetString("S3_REGION"),
-			UseSSL:     false,
+			Endpoint:       withDefault("S3_ENDPOINT", fmt.Sprintf("localhost:%s", viper.GetString("MINIO_API_PORT"))),
+			PublicEndpoint: withDefault("S3_PUBLIC_ENDPOINT", fmt.Sprintf("localhost:%s", viper.GetString("MINIO_API_PORT"))),
+			AccessKey:      viper.GetString("MINIO_ROOT_USER"),
+			SecretKey:      viper.GetString("MINIO_ROOT_PASSWORD"),
+			BucketName:     viper.GetString("S3_BUCKET_NAME"),
+			Region:         viper.GetString("S3_REGION"),
+			UseSSL:         false,
 		},
 		JWT: JWTConfig{
 			AccessSecret:  viper.GetString("JWT_ACCESS_SECRET"),
@@ -156,6 +173,11 @@ func Load() (*Config, error) {
 			Host:            withDefault("OLLAMA_HOST", "http://localhost:11434"),
 			GenerationModel: withDefault("OLLAMA_GENERATION_MODEL", "qwen2.5:7b-instruct"),
 			EmbeddingModel:  withDefault("OLLAMA_EMBEDDING_MODEL", "bge-m3"),
+		},
+		VAPID: VAPIDConfig{
+			PublicKey:  viper.GetString("VAPID_PUBLIC_KEY"),
+			PrivateKey: viper.GetString("VAPID_PRIVATE_KEY"),
+			Subject:    withDefault("VAPID_SUBJECT", "mailto:admin@medflow.local"),
 		},
 	}
 

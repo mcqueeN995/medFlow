@@ -66,6 +66,22 @@ func (m *mockUserRepo) FindPublicByID(ctx context.Context, id uuid.UUID) (*model
 	return nil, models.ErrUserNotFound
 }
 
+func (m *mockUserRepo) AdminList(ctx context.Context, f models.AdminUserListFilter) ([]models.User, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockUserRepo) ChangeRole(ctx context.Context, id uuid.UUID, role models.UserRole) (*models.User, error) {
+	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepo) Ban(ctx context.Context, id, bannedBy uuid.UUID, reason string) (*models.User, error) {
+	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepo) Unban(ctx context.Context, id uuid.UUID) (*models.User, error) {
+	return nil, models.ErrUserNotFound
+}
+
 type mockTokenRepo struct {
 	saveFn           func(ctx context.Context, token *models.RefreshToken) error
 	findByHashFn     func(ctx context.Context, hash string) (*models.RefreshToken, error)

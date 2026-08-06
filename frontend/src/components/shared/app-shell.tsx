@@ -1,20 +1,23 @@
 import { NavLink, Outlet } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, LogIn } from 'lucide-react'
+import { ChevronLeft, ChevronRight, LogIn, ShieldCheck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { navItems } from '@/lib/nav-items'
 import { Logo } from '@/components/shared/logo'
 import { ThemeToggle } from '@/components/shared/theme-toggle'
 import { useAuthStore } from '@/stores/auth-store'
 import { useUIStore } from '@/stores/ui-store'
+import { UserRole } from '@/api/generated'
 
 export function AppShell() {
   const isGuest = useAuthStore((s) => !s.accessToken)
+  const role = useAuthStore((s) => s.user?.role)
   const collapsed = useUIStore((s) => s.sidebarCollapsed)
   const toggleSidebar = useUIStore((s) => s.toggleSidebar)
 
-  const items = navItems.map((item) =>
-    item.to === '/profile' && isGuest ? { ...item, label: 'Войти', to: '/login', icon: LogIn } : item,
-  )
+  const canModerate = role === UserRole.moderator || role === UserRole.admin
+  const items = navItems
+    .map((item) => (item.to === '/profile' && isGuest ? { ...item, label: 'Войти', to: '/login', icon: LogIn } : item))
+    .concat(canModerate ? [{ to: '/admin', label: 'Админ', icon: ShieldCheck }] : [])
 
   return (
     <div className="flex min-h-svh flex-col bg-background md:flex-row">

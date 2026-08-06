@@ -6,6 +6,7 @@ import { uploadHandlers } from './handlers/upload'
 import { navigatorHandlers } from './handlers/navigator'
 import { cardsHandlers } from './handlers/cards'
 import { forumHandlers } from './handlers/forum'
+import { pushHandlers } from './handlers/push'
 
 // Хендлеры с реалистичным поведением идут первыми — переопределяют
 // автогенерированные заглушки там, где нужен настоящий сценарий (стейт,
@@ -17,5 +18,6 @@ export const worker = setupWorker(
   ...navigatorHandlers,
   ...cardsHandlers,
   ...forumHandlers,
+  ...pushHandlers,
   ...getMedFlowAPIMock(),
 )

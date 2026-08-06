@@ -1,0 +1,226 @@
+{
+  "id": null,
+  "uid": "medflow-overview",
+  "title": "medFlow — Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    { "type": "row", "title": "Backend HTTP — Request rate (req/s) по модулям", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "id": 100, "collapsed": false, "panels": [] },
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Auth — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 1 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/auth/.+\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Admin — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 1 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/admin/.+\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Library / Navigator — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 1 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/(library|map)/.+\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Cards — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 10 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/cards/.+\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Forum (Threads/Comments) — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 10 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/(threads|comments).*\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Users / Upload / Push / Infra — req/s",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 10 },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{path=~\"/api/v1/(users|upload|push).*|/health|/metrics\"}[1m])) by (path)", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+
+    { "type": "row", "title": "Backend HTTP — p95 latency по модулям", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 }, "id": 110, "collapsed": false, "panels": [] },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Auth — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/auth/.+\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Admin — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/admin/.+\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Library / Navigator — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/(library|map)/.+\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Cards — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 0, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/cards/.+\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Forum (Threads/Comments) — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 8, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/(threads|comments).*\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Users / Upload / Push / Infra — p95 latency",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 29 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{path=~\"/api/v1/(users|upload|push).*|/health|/metrics\"}[5m])) by (le, path))", "legendFormat": "{{path}}", "refId": "A" }
+      ]
+    },
+
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "429 (rate-limited) — last hour",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 38 },
+      "targets": [
+        { "expr": "sum(increase(http_requests_total{status=\"429\"}[1h])) or vector(0)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "stat",
+      "title": "5xx errors — last hour",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 38 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "targets": [
+        { "expr": "sum(increase(http_requests_total{status=~\"5..\"}[1h])) or vector(0)", "refId": "A" }
+      ]
+    },
+
+    { "type": "row", "title": "Тесты (Vitest / Playwright)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 }, "id": 101, "collapsed": false, "panels": [] },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Vitest — passed",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 43 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "targets": [ { "expr": "medflow_test_passed{suite=\"vitest\"}", "refId": "A" } ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Vitest — failed",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 43 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "targets": [ { "expr": "medflow_test_failed{suite=\"vitest\"}", "refId": "A" } ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Vitest — total",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 43 },
+      "targets": [ { "expr": "medflow_test_total{suite=\"vitest\"}", "refId": "A" } ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Playwright — passed",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 43 },
+      "fieldConfig": { "defaults": { "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+      "targets": [ { "expr": "medflow_test_passed{suite=\"playwright\"}", "refId": "A" } ]
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Playwright — failed",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 43 },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "targets": [ { "expr": "medflow_test_failed{suite=\"playwright\"}", "refId": "A" } ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Playwright — total",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 43 },
+      "targets": [ { "expr": "medflow_test_total{suite=\"playwright\"}", "refId": "A" } ]
+    },
+    {
+      "id": 16,
+      "type": "stat",
+      "title": "Последний прогон тестов",
+      "datasource": { "type": "prometheus" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 47 },
+      "fieldConfig": { "defaults": { "unit": "dateTimeAsIso" }, "overrides": [] },
+      "targets": [ { "expr": "max(medflow_test_last_run_timestamp) * 1000", "refId": "A" } ]
+    }
+  ]
+}

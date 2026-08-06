@@ -1,4 +1,5 @@
 import axios, { type AxiosRequestConfig } from 'axios'
+import { toast } from 'sonner'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const axiosInstance = axios.create({
@@ -29,6 +30,10 @@ axiosInstance.interceptors.response.use(
         return axiosInstance(original)
       }
       useAuthStore.getState().logout()
+    } else if (error.response?.status === 429) {
+      const retryAfter = error.response.headers?.['retry-after']
+      const suffix = retryAfter ? ` (повторите через ${retryAfter} сек)` : ''
+      toast.error((error.response.data?.error?.message ?? 'Слишком много запросов, попробуйте позже') + suffix)
     }
     return Promise.reject(error)
   },

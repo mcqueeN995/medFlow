@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Flame, Reply, Trash2, TriangleAlert } from 'lucide-react'
+import { EyeOff, Flame, Reply, ShieldX, Trash2, TriangleAlert } from 'lucide-react'
 import type { Comment } from '@/api/generated'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -14,10 +14,27 @@ interface CommentItemProps {
   onReply: (parentId: string, content: string) => Promise<void>
   onDelete: (id: string) => void
   onReport: (id: string) => void
+  canModerate?: boolean
+  isAdmin?: boolean
+  onHide?: (id: string) => void
+  onAdminDelete?: (id: string) => void
   nested?: boolean
 }
 
-export function CommentItem({ comment, currentUserId, reacted, onReact, onReply, onDelete, onReport, nested }: CommentItemProps) {
+export function CommentItem({
+  comment,
+  currentUserId,
+  reacted,
+  onReact,
+  onReply,
+  onDelete,
+  onReport,
+  canModerate,
+  isAdmin,
+  onHide,
+  onAdminDelete,
+  nested,
+}: CommentItemProps) {
   const [replying, setReplying] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -61,6 +78,20 @@ export function CommentItem({ comment, currentUserId, reacted, onReact, onReply,
           <button type="button" onClick={() => onReport(comment.id!)} className="flex items-center gap-1 hover:text-destructive">
             <TriangleAlert className="size-3.5" /> Пожаловаться
           </button>
+        )}
+        {canModerate && (
+          <>
+            {!comment.hidden_at && (
+              <button type="button" onClick={() => onHide?.(comment.id!)} className="flex items-center gap-1 hover:text-destructive">
+                <EyeOff className="size-3.5" /> Скрыть
+              </button>
+            )}
+            {isAdmin && (
+              <button type="button" onClick={() => onAdminDelete?.(comment.id!)} className="flex items-center gap-1 hover:text-destructive">
+                <ShieldX className="size-3.5" /> Удалить (админ)
+              </button>
+            )}
+          </>
         )}
       </div>
 
