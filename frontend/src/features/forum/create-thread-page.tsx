@@ -52,7 +52,7 @@ export function CreateThreadPage() {
   return (
     <div className="mx-auto flex max-w-xl flex-col gap-5 p-6">
       <Link to="/forum" className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> К форуму
+        <ArrowLeft className="size-4" /> К тредам
       </Link>
 
       <div>

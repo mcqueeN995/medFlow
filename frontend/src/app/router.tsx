@@ -113,7 +113,7 @@ export const router = createBrowserRouter([
         // openapi.yaml (как и у Cards, см. подтверждённое решение "как в ТЗ").
         element: (
           <RequireAuthOutlet
-            title="Форум — только для авторизованных"
+            title="Треды — только для авторизованных"
             description="Войдите, чтобы читать и создавать треды, комментировать и ставить реакции."
           />
         ),

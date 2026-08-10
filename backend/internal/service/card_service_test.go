@@ -60,7 +60,7 @@ func setupTestCardService(
 	if enqueuer == nil {
 		enqueuer = &mockTaskEnqueuer{}
 	}
-	return NewCardService(taskRepo, cardRepo, progressRepo, chunkRepo, textbookRepo, uploadRepo, reportRepo, storage, llmProvider, enqueuer, &mockPushNotifier{})
+	return NewCardService(taskRepo, cardRepo, progressRepo, chunkRepo, textbookRepo, uploadRepo, reportRepo, storage, llmProvider, llmProvider, enqueuer, &mockPushNotifier{})
 }
 
 // ==================== CreateTask ====================
@@ -506,7 +506,7 @@ func TestCardService_ProcessTask_LLMFailure_NotifiesCardTaskFailed(t *testing.T)
 	svc := NewCardService(taskRepo, &mockCardRepository{}, &mockCardProgressRepository{}, chunkRepo, &mockTextbookRepository{},
 		&mockUploadRepository{findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Upload, error) {
 			return &models.Upload{ID: id, UploadType: "pdf", S3Key: "uploads/pdf/x.pdf"}, nil
-		}}, &mockReportRepository{}, &mockObjectStorage{}, llmProvider, &mockTaskEnqueuer{}, notifier)
+		}}, &mockReportRepository{}, &mockObjectStorage{}, llmProvider, llmProvider, &mockTaskEnqueuer{}, notifier)
 
 	if err := svc.ProcessTask(context.Background(), task.ID); err != nil {
 		t.Fatalf("ProcessTask() error = %v", err)

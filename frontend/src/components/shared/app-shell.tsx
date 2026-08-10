@@ -69,19 +69,19 @@ export function AppShell() {
         </div>
       </aside>
 
-      <main className="flex-1 pb-20 md:pb-0">
+      <main className="flex-1 pb-24 md:pb-0">
         <Outlet />
       </main>
 
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-border bg-card/95 backdrop-blur-sm md:hidden">
+      <nav className="fixed inset-x-3 bottom-3 z-10 flex items-center justify-around rounded-3xl border border-sidebar-border/60 bg-sidebar/70 p-1 text-sidebar-foreground shadow-lg backdrop-blur-2xl md:hidden">
         {items.map(({ to, label, icon: Icon }) => (
           <NavLink
             key={to}
             to={to}
             className={({ isActive }) =>
               cn(
-                'flex flex-1 flex-col items-center gap-1 py-2.5 text-[11px] font-medium text-muted-foreground',
-                isActive && 'text-primary',
+                'flex flex-1 flex-col items-center gap-1 rounded-2xl py-2.5 text-[11px] font-medium text-sidebar-foreground/70 transition-colors',
+                isActive && 'bg-sidebar-accent/15 text-sidebar-primary',
               )
             }
           >

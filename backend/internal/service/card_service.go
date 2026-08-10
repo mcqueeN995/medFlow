@@ -51,10 +51,17 @@ type CardService struct {
 	reportRepo   ReportRepository
 	storage      ObjectStorage
 	llm          llm.Provider
+	embed        llm.Provider
 	enqueuer     TaskEnqueuer
 	pushNotifier PushNotifier
 }
 
+// NewCardService. llmProvider генерирует текст карточек (cfg.LLM.Provider -
+// облачный DeepSeek/Qwen/OpenRouter или локальная Ollama). embedProvider
+// считает эмбеддинги и должен быть построен через llm.NewOllamaProvider
+// независимо от llmProvider - см. llm.ErrEmbedNotSupported: у облачных
+// провайдеров нет единого контракта на эмбеддинги, а размерность вектора в
+// БД (vector(1024)) зафиксирована под bge-m3 через Ollama.
 func NewCardService(
 	taskRepo CardTaskRepository,
 	cardRepo CardRepository,
@@ -65,13 +72,14 @@ func NewCardService(
 	reportRepo ReportRepository,
 	storage ObjectStorage,
 	llmProvider llm.Provider,
+	embedProvider llm.Provider,
 	enqueuer TaskEnqueuer,
 	pushNotifier PushNotifier,
 ) *CardService {
 	return &CardService{
 		taskRepo: taskRepo, cardRepo: cardRepo, progressRepo: progressRepo, chunkRepo: chunkRepo,
 		textbookRepo: textbookRepo, uploadRepo: uploadRepo, reportRepo: reportRepo,
-		storage: storage, llm: llmProvider, enqueuer: enqueuer, pushNotifier: pushNotifier,
+		storage: storage, llm: llmProvider, embed: embedProvider, enqueuer: enqueuer, pushNotifier: pushNotifier,
 	}
 }
 
@@ -476,7 +484,7 @@ func (s *CardService) runPipeline(ctx context.Context, task *models.CardTask) ([
 		return nil, err
 	}
 
-	topicEmbedding, err := s.llm.Embed(ctx, *task.Topic)
+	topicEmbedding, err := s.embed.Embed(ctx, *task.Topic)
 	if err != nil {
 		return nil, fmt.Errorf("embed topic: %w", err)
 	}
@@ -579,7 +587,7 @@ func (s *CardService) ensureChunks(ctx context.Context, task *models.CardTask) e
 
 	chunks := make([]models.TextbookChunk, len(rawChunks))
 	for i, rc := range rawChunks {
-		embedding, err := s.llm.Embed(ctx, rc.Content)
+		embedding, err := s.embed.Embed(ctx, rc.Content)
 		if err != nil {
 			return fmt.Errorf("embed chunk %d: %w", i, err)
 		}

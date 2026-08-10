@@ -281,7 +281,7 @@ export function ThreadDetailPage() {
       <div className="flex flex-col items-center gap-3 p-16 text-center">
         <p className="font-medium text-foreground">Тред не найден</p>
         <Link to="/forum" className="text-sm text-accent underline underline-offset-2">
-          Вернуться на форум
+          Вернуться к тредам
         </Link>
       </div>
     )
@@ -292,7 +292,7 @@ export function ThreadDetailPage() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5 p-6">
       <Link to="/forum" className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-4" /> К форуму
+        <ArrowLeft className="size-4" /> К тредам
       </Link>
 
       <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-6">

@@ -45,6 +45,9 @@ func New(cfg *config.Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init llm provider: %w", err)
 	}
+	// Эмбеддинги карточек всегда идут через Ollama, независимо от того, кем
+	// сконфигурирован llmProvider выше — см. llm.ErrEmbedNotSupported.
+	embedProvider := llm.NewOllamaProvider(cfg.Ollama.Host, cfg.Ollama.GenerationModel, cfg.Ollama.EmbeddingModel)
 
 	redisAddr := fmt.Sprintf("%s:%s", cfg.Redis.Host, cfg.Redis.Port)
 	queueClient := queue.New(redisAddr)
@@ -76,7 +79,7 @@ func New(cfg *config.Config) (*Server, error) {
 	uploadService := service.NewUploadService(uploadRepo, s3Client)
 	cardService := service.NewCardService(
 		cardTaskRepo, cardRepo, cardProgressRepo, textbookChunkRepo, textbookRepo, uploadRepo, reportRepo,
-		s3Client, llmProvider, queueClient, pushService,
+		s3Client, llmProvider, embedProvider, queueClient, pushService,
 	)
 	poiService := service.NewPOIService(poiRepo, auditLogRepo)
 	adminService := service.NewAdminService(reportRepo, auditLogRepo, adminStatsRepo)

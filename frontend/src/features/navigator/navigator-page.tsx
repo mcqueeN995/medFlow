@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
-import 'leaflet/dist/leaflet.css'
-import { useTheme } from 'next-themes'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { YMaps, Map as YMap, Placemark, ZoomControl } from '@pbe/react-yandex-maps'
+import type { Map as YMapInstance } from 'yandex-maps'
 import { ExternalLink, LocateFixed, Star, X } from 'lucide-react'
 import { getMapPoi } from '@/api/generated/medFlowAPI'
 import { PoiType } from '@/api/generated'
@@ -20,26 +19,7 @@ const ALL = '__all__'
 // геолокации пользователя.
 const DEFAULT_CENTER: [number, number] = [55.7325, 37.582]
 
-// OSM-тайлы всегда светлые: для тёмной темы используем бесплатные тайлы
-// CartoDB (без API-ключа) — иначе карта выбивается из тёмного интерфейса.
-const TILE_LAYERS = {
-  light: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-  },
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  },
-}
-
-function MapController({ center, zoom }: { center: [number, number]; zoom: number }) {
-  const map = useMap()
-  useEffect(() => {
-    map.flyTo(center, zoom, { duration: 0.6 })
-  }, [center, zoom, map])
-  return null
-}
+const YANDEX_MAPS_API_KEY = import.meta.env.VITE_YANDEX_MAPS_API_KEY as string | undefined
 
 export function NavigatorPage() {
   const [type, setType] = useState(ALL)
@@ -48,8 +28,7 @@ export function NavigatorPage() {
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const { position, loading: locating, error: geoError, locate } = useGeolocation()
-  const { resolvedTheme } = useTheme()
-  const tiles = resolvedTheme === 'dark' ? TILE_LAYERS.dark : TILE_LAYERS.light
+  const mapRef = useRef<YMapInstance | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -69,6 +48,11 @@ export function NavigatorPage() {
     : selected
       ? [selected.latitude!, selected.longitude!]
       : DEFAULT_CENTER
+
+  useEffect(() => {
+    mapRef.current?.setCenter(mapCenter, selected ? 17 : 15, { duration: 600 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapCenter[0], mapCenter[1], selected])
 
   function toggleTag(tag: string) {
     setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]))
@@ -173,22 +157,41 @@ export function NavigatorPage() {
       </div>
 
       <div className="relative min-h-0 flex-1">
-        <MapContainer center={DEFAULT_CENTER} zoom={15} className="h-full w-full" scrollWheelZoom>
-          <TileLayer key={resolvedTheme} attribution={tiles.attribution} url={tiles.url} />
-          <MapController center={mapCenter} zoom={selected ? 17 : 15} />
-          {position && <Marker position={[position.lat, position.lon]} icon={getUserLocationIcon()} />}
-          {poi.map((p) => (
-            <Marker
-              key={p.id}
-              position={[p.latitude!, p.longitude!]}
-              icon={getPoiIcon(p.type ?? PoiType.other, p.id === selectedId)}
-              eventHandlers={{ click: () => setSelectedId(p.id ?? null) }}
-            />
-          ))}
-        </MapContainer>
+        {YANDEX_MAPS_API_KEY ? (
+          <YMaps query={{ apikey: YANDEX_MAPS_API_KEY, lang: 'ru_RU' }}>
+            <YMap
+              defaultState={{ center: DEFAULT_CENTER, zoom: 15 }}
+              width="100%"
+              height="100%"
+              modules={['control.ZoomControl']}
+              instanceRef={(ref: YMapInstance | null) => {
+                mapRef.current = ref
+              }}
+              options={{ suppressMapOpenBlock: true }}
+            >
+              <ZoomControl options={{ position: { right: 10, top: 10 } }} />
+              {position && (
+                <Placemark geometry={[position.lat, position.lon]} options={getUserLocationIcon()} />
+              )}
+              {poi.map((p) => (
+                <Placemark
+                  key={p.id}
+                  geometry={[p.latitude!, p.longitude!]}
+                  options={{ iconLayout: 'default#image', ...getPoiIcon(p.type ?? PoiType.other, p.id === selectedId) }}
+                  onClick={() => setSelectedId(p.id ?? null)}
+                />
+              ))}
+            </YMap>
+          </YMaps>
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-secondary p-6 text-center text-sm text-muted-foreground">
+            Карта недоступна: не задан VITE_YANDEX_MAPS_API_KEY. Получите бесплатный ключ на
+            developer.tech.yandex.ru и добавьте его в frontend/.env.local.
+          </div>
+        )}
 
         {selected && (
-          <div className="absolute inset-x-3 bottom-3 z-[400] rounded-2xl border border-border bg-card p-4 shadow-lg md:left-3 md:right-auto md:w-80">
+          <div className="absolute inset-x-3 bottom-3 z-400 rounded-2xl border border-border bg-card p-4 shadow-lg md:left-3 md:right-auto md:w-80">
             <button
               onClick={() => setSelectedId(null)}
               className="absolute top-3 right-3 text-muted-foreground hover:text-foreground"

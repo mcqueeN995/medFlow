@@ -7,7 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 const METRICS: Array<{ key: keyof AdminStats; label: string; icon: typeof Users }> = [
   { key: 'users_total', label: 'Всего пользователей', icon: Users },
   { key: 'users_banned', label: 'Забанено', icon: Ban },
-  { key: 'threads_total', label: 'Тредов на форуме', icon: MessageSquare },
+  { key: 'threads_total', label: 'Тредов всего', icon: MessageSquare },
   { key: 'card_tasks_total', label: 'Задач на карточки', icon: Layers },
   { key: 'card_tasks_pending', label: 'Задач в очереди', icon: ListTodo },
   { key: 'active_sessions', label: 'Активных сессий', icon: Activity },

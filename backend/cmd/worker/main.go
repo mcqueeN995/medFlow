@@ -45,6 +45,9 @@ func main() {
 		slog.Error("failed to init llm provider", "error", err)
 		os.Exit(1)
 	}
+	// Эмбеддинги карточек всегда идут через Ollama, независимо от того, кем
+	// сконфигурирован llmProvider выше — см. llm.ErrEmbedNotSupported.
+	embedProvider := llm.NewOllamaProvider(cfg.Ollama.Host, cfg.Ollama.GenerationModel, cfg.Ollama.EmbeddingModel)
 
 	cardTaskRepo := repository.NewCardTaskRepo(pool)
 	cardRepo := repository.NewCardRepo(pool)
@@ -60,7 +63,7 @@ func main() {
 	// nil безопасен, т.к. CardService.ProcessTask его не использует.
 	cardService := service.NewCardService(
 		cardTaskRepo, cardRepo, cardProgressRepo, textbookChunkRepo, textbookRepo, uploadRepo, reportRepo,
-		s3Client, llmProvider, nil, pushService,
+		s3Client, llmProvider, embedProvider, nil, pushService,
 	)
 	cardTaskHandler := worker.NewCardTaskHandler(cardService)
 

@@ -56,7 +56,7 @@ export function ForumFeedPage() {
     <div className="flex flex-col gap-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-primary">Форум</h1>
+          <h1 className="text-2xl font-bold text-primary">Треды</h1>
           <p className="text-sm text-muted-foreground">Обсуждения, вопросы и барахолка для студентов-медиков</p>
         </div>
         <Link to="/forum/create" className={cn(buttonVariants(), 'h-10 rounded-full bg-linear-to-r from-primary to-accent px-4 text-primary-foreground')}>

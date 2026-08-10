@@ -100,6 +100,28 @@ services:
     networks:
       - medflow-network
 
+  # Разово создаёт тестовых пользователей (admin/moderator/user@medflow.dev,
+  # пароль password123) для входа в дебаге. Сам бинарь проверяет APP_ENV и
+  # ничего не делает при APP_ENV=production — сервис безопасно оставлять
+  # в compose, в проде он просто выйдет без изменений.
+  seed:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      args:
+        CMD_PATH: cmd/seed
+    container_name: medflow_seed
+    env_file: ../.env
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - medflow-network
+
   backend:
     build:
       context: ../backend
@@ -182,6 +204,9 @@ services:
         # Публичный VAPID-ключ не секрет - тот же, что VAPID_PUBLIC_KEY у
         # backend/worker (см. .env), встраивается в бандл на этапе сборки.
         VITE_VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+        # Ключ Yandex Maps JS API (см. YANDEX_MAPS_API_KEY в .env) — без него
+        # /navigator покажет заглушку вместо карты.
+        VITE_YANDEX_MAPS_API_KEY: ${YANDEX_MAPS_API_KEY:-}
     container_name: medflow_frontend
     restart: unless-stopped
     networks:
