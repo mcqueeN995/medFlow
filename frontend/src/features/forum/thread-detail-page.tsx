@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Eye, EyeOff, Flame, MessageCircle, Pencil, Send, ShieldX, Trash2, TriangleAlert } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, ChevronDown, ChevronUp, Eye, EyeOff, Flame, MessageCircle, Pencil, Send, ShieldX, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   deleteAdminCommentsId,
@@ -36,6 +36,11 @@ import { CommentItem } from './comment-item'
 export function ThreadDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  // ?highlight=commentId - deep-link из админ-панели жалоб (см. reports-page.tsx):
+  // раскрывает ветку ответов и подсвечивает конкретный комментарий/ответ.
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight') ?? undefined
+  const scrolledToHighlight = useRef(false)
   const currentUserId = useAuthStore((s) => s.user?.id)
   const role = useAuthStore((s) => s.user?.role)
   const canModerate = role === UserRole.moderator || role === UserRole.admin
@@ -59,6 +64,30 @@ export function ThreadDetailPage() {
   // поэтому подсветка "я лайкнул" живёт только в рамках текущей сессии страницы.
   const [reactedThread, setReactedThread] = useState(false)
   const [reactedComments, setReactedComments] = useState<Set<string>>(new Set())
+
+  // Ответы под верхнеуровневым комментарием по умолчанию свёрнуты - виден
+  // только счётчик, раскрывает пользователь сам по клику.
+  const [expandedReplies, setExpandedReplies] = useState<Set<string>>(new Set())
+
+  function toggleReplies(commentId: string) {
+    setExpandedReplies((prev) => {
+      const next = new Set(prev)
+      if (next.has(commentId)) next.delete(commentId)
+      else next.add(commentId)
+      return next
+    })
+  }
+
+  useEffect(() => {
+    if (!highlightId || scrolledToHighlight.current || commentsLoading || comments.length === 0) return
+    const owner = comments.find((c) => c.id === highlightId || c.replies?.some((r) => r.id === highlightId))
+    if (!owner) return
+    if (owner.id !== highlightId) setExpandedReplies((prev) => new Set(prev).add(owner.id!))
+    scrolledToHighlight.current = true
+    requestAnimationFrame(() => {
+      document.getElementById(`comment-${highlightId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }, [highlightId, commentsLoading, comments])
 
   function loadThread() {
     if (!id) return
@@ -201,6 +230,11 @@ export function ThreadDetailPage() {
       await postThreadsThreadIdComments(id, { content, parent_id: parentId })
       loadComments()
       setThread((t) => (t ? { ...t, comments_count: (t.comments_count ?? 0) + 1 } : t))
+      // Раскрываем ветку ответов верхнеуровневого комментария, к которому
+      // относится parentId (сам parentId может быть вложенным ответом),
+      // чтобы только что отправленный ответ не оказался скрыт по умолчанию.
+      const topLevelId = comments.find((c) => c.id === parentId || c.replies?.some((r) => r.id === parentId))?.id ?? parentId
+      setExpandedReplies((prev) => new Set(prev).add(topLevelId))
     } catch {
       toast.error('Не удалось отправить ответ')
     }
@@ -499,28 +533,48 @@ export function ThreadDetailPage() {
                   isAdmin={isAdmin}
                   onHide={hideComment}
                   onAdminDelete={adminDeleteComment}
+                  highlighted={c.id === highlightId}
                 />
-                {c.replies?.map((r) => (
-                  <CommentItem
-                    key={r.id}
-                    comment={r}
-                    currentUserId={currentUserId}
-                    reacted={reactedComments.has(r.id!)}
-                    onReact={toggleCommentReaction}
-                    onVote={voteComment}
-                    onReply={submitReply}
-                    onDelete={deleteComment}
-                    onReport={reportComment}
-                    canModerate={canModerate}
-                    isAdmin={isAdmin}
-                    onHide={hideComment}
-                    onAdminDelete={adminDeleteComment}
-                    replyToAuthorNickname={
-                      r.reply_to_id ? c.replies?.find((sibling) => sibling.id === r.reply_to_id)?.author?.nickname : undefined
-                    }
-                    nested
-                  />
-                ))}
+                {c.replies && c.replies.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => toggleReplies(c.id!)}
+                    className="ml-6 flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    {expandedReplies.has(c.id!) ? (
+                      <>
+                        <ChevronUp className="size-3.5" /> Скрыть ответы
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown className="size-3.5" /> Показать ответы ({c.replies.length})
+                      </>
+                    )}
+                  </button>
+                )}
+                {expandedReplies.has(c.id!) &&
+                  c.replies?.map((r) => (
+                    <CommentItem
+                      key={r.id}
+                      comment={r}
+                      currentUserId={currentUserId}
+                      reacted={reactedComments.has(r.id!)}
+                      onReact={toggleCommentReaction}
+                      onVote={voteComment}
+                      onReply={submitReply}
+                      onDelete={deleteComment}
+                      onReport={reportComment}
+                      canModerate={canModerate}
+                      isAdmin={isAdmin}
+                      onHide={hideComment}
+                      onAdminDelete={adminDeleteComment}
+                      replyToAuthorNickname={
+                        r.reply_to_id ? c.replies?.find((sibling) => sibling.id === r.reply_to_id)?.author?.nickname : undefined
+                      }
+                      nested
+                      highlighted={r.id === highlightId}
+                    />
+                  ))}
               </div>
             ))}
           </div>

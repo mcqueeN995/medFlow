@@ -148,7 +148,7 @@ func (s *ForumService) Report(ctx context.Context, reporterID uuid.UUID, targetT
 	if err != nil {
 		return nil, err
 	}
-	out := dto.ToReport(report)
+	out := dto.ToReport(report, nil)
 	return &out, nil
 }
 

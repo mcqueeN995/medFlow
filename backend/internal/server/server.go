@@ -93,7 +93,7 @@ func New(cfg *config.Config) (*Server, error) {
 		s3Client, llmProvider, embedProvider, queueClient, pushService,
 	)
 	poiService := service.NewPOIService(poiRepo, auditLogRepo)
-	adminService := service.NewAdminService(reportRepo, auditLogRepo, adminStatsRepo)
+	adminService := service.NewAdminService(reportRepo, auditLogRepo, adminStatsRepo, threadRepo, commentRepo, cardRepo)
 
 	authHandler := handler.NewAuthHandler(authService, loginGuard)
 	forumHandler := handler.NewForumHandler(forumService)

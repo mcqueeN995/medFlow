@@ -25,6 +25,9 @@ interface CommentItemProps {
   // комментария - иначе на вложенных ответах непонятно, кому именно
   // адресован ответ (см. models.Comment.ReplyToID на бэкенде).
   replyToAuthorNickname?: string
+  // highlighted - подсветка при переходе по deep-link из админ-панели жалоб
+  // (?highlight=commentId в ThreadDetailPage).
+  highlighted?: boolean
 }
 
 export function CommentItem({
@@ -42,6 +45,7 @@ export function CommentItem({
   onAdminDelete,
   nested,
   replyToAuthorNickname,
+  highlighted,
 }: CommentItemProps) {
   const [replying, setReplying] = useState(false)
   const [replyText, setReplyText] = useState('')
@@ -62,7 +66,14 @@ export function CommentItem({
   }
 
   return (
-    <div className={cn('flex flex-col gap-1.5', nested && 'ml-6 border-l border-border pl-4')}>
+    <div
+      id={`comment-${comment.id}`}
+      className={cn(
+        'flex flex-col gap-1.5 rounded-xl',
+        nested && 'ml-6 border-l border-border pl-4',
+        highlighted && 'bg-accent/10 p-2 ring-2 ring-accent',
+      )}
+    >
       {replyToAuthorNickname && (
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <CornerDownRight className="size-3" /> Ответ пользователю {replyToAuthorNickname}

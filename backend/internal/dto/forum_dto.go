@@ -243,15 +243,37 @@ type Report struct {
 	ReviewedAt     *time.Time          `json:"reviewed_at,omitempty"`
 	ResolutionNote *string             `json:"resolution_note,omitempty"`
 	CreatedAt      time.Time           `json:"created_at"`
+	// TargetThreadID - id треда, к которому относится жалоба: для target_type
+	// "thread" совпадает с TargetID, для "comment" - id родительского треда
+	// (чтобы фронт мог построить ссылку /forum/:id независимо от типа цели).
+	TargetThreadID *string `json:"target_thread_id,omitempty"`
+	// TargetTaskID - id card_tasks для target_type "card", ссылка на /cards/tasks/:id.
+	TargetTaskID  *string `json:"target_task_id,omitempty"`
+	TargetTitle   *string `json:"target_title,omitempty"`
+	TargetSnippet *string `json:"target_snippet,omitempty"`
+	// TargetRemoved - объект уже скрыт/удалён (модератором либо автором) или
+	// вовсе не найден к моменту просмотра жалобы.
+	TargetRemoved bool `json:"target_removed"`
 }
 
-func ToReport(r *models.Report) Report {
+// ReportTargetContext - контекст цели жалобы, собираемый вызывающей стороной
+// (AdminService) по target_type/target_id из соответствующего репозитория -
+// сам Report/ReportRepo ничего не знает о threads/comments/cards.
+type ReportTargetContext struct {
+	ThreadID *uuid.UUID
+	TaskID   *uuid.UUID
+	Title    *string
+	Snippet  *string
+	Removed  bool
+}
+
+func ToReport(r *models.Report, target *ReportTargetContext) Report {
 	var reviewedBy *string
 	if r.ReviewedBy != nil {
 		s := r.ReviewedBy.String()
 		reviewedBy = &s
 	}
-	return Report{
+	out := Report{
 		ID:             r.ID.String(),
 		ReporterID:     r.ReporterID.String(),
 		TargetType:     r.TargetType,
@@ -263,4 +285,18 @@ func ToReport(r *models.Report) Report {
 		ResolutionNote: r.ResolutionNote,
 		CreatedAt:      r.CreatedAt,
 	}
+	if target != nil {
+		if target.ThreadID != nil {
+			s := target.ThreadID.String()
+			out.TargetThreadID = &s
+		}
+		if target.TaskID != nil {
+			s := target.TaskID.String()
+			out.TargetTaskID = &s
+		}
+		out.TargetTitle = target.Title
+		out.TargetSnippet = target.Snippet
+		out.TargetRemoved = target.Removed
+	}
+	return out
 }

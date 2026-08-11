@@ -31,4 +31,26 @@ export interface Report {
   /** @nullable */
   resolution_note?: string | null;
   created_at?: string;
+  /**
+     * Id треда, к которому относится жалоба: для target_type=thread совпадает с target_id, для target_type=comment - id родительского треда. Отсутствует для target_type=card.
+     * @nullable
+     */
+  target_thread_id?: string | null;
+  /**
+     * Id card_tasks для target_type=card, ссылка на /cards/tasks/{id}.
+     * @nullable
+     */
+  target_task_id?: string | null;
+  /**
+     * Заголовок треда (thread/comment).
+     * @nullable
+     */
+  target_title?: string | null;
+  /**
+     * Превью текста цели жалобы (до 200 символов).
+     * @nullable
+     */
+  target_snippet?: string | null;
+  /** Цель жалобы уже скрыта/удалена или не найдена. */
+  target_removed?: boolean;
 }

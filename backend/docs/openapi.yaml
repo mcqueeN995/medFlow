@@ -2518,6 +2518,24 @@ components:
         reviewed_at: { type: string, format: date-time, nullable: true }
         resolution_note: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
+        target_thread_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Id треда, к которому относится жалоба: для target_type=thread
+            совпадает с target_id, для target_type=comment - id
+            родительского треда. Отсутствует для target_type=card.
+        target_task_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Id card_tasks для target_type=card, ссылка на /cards/tasks/{id}.
+        target_title: { type: string, nullable: true, description: 'Заголовок треда (thread/comment).' }
+        target_snippet: { type: string, nullable: true, description: 'Превью текста цели жалобы (до 200 символов).' }
+        target_removed:
+          type: boolean
+          description: Цель жалобы уже скрыта/удалена или не найдена.
 
     # ---------- Subscriptions ----------
     Subscription:

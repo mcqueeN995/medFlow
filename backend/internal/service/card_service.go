@@ -414,7 +414,7 @@ func (s *CardService) ReportCard(ctx context.Context, userID, cardID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	out := dto.ToReport(report)
+	out := dto.ToReport(report, nil)
 	return &out, nil
 }
 
