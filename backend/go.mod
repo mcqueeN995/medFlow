@@ -12,6 +12,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/prometheus/client_golang v1.24.1
+	github.com/redis/go-redis/v9 v9.14.1
 	github.com/spf13/viper v1.21.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/time v0.15.0
@@ -56,7 +57,6 @@ require (
 	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
-	github.com/redis/go-redis/v9 v9.14.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/sagikazarmark/locafero v0.11.0 // indirect

@@ -23,7 +23,15 @@ const cardSelectColumns = `
 	page_approx, source_reference, difficulty, report_count, created_at
 `
 
-func (r *CardRepo) scan(row pgx.Row) (*models.Card, error) {
+// cardSelectColumnsAliased/scanCardAliased - та же карточка, но с префиксом
+// c. для запросов с JOIN (card_favorites, card_ratings), где не-алиасные
+// имена колонок были бы неоднозначны.
+const cardSelectColumnsAliased = `
+	c.id, c.task_id, c.textbook_id, c.chapter, c.topic, c.subtopic, c.question, c.answer,
+	c.page_approx, c.source_reference, c.difficulty, c.report_count, c.created_at
+`
+
+func scanCardAliased(row pgx.Row) (*models.Card, error) {
 	var c models.Card
 	var difficulty string
 	err := row.Scan(
@@ -35,6 +43,10 @@ func (r *CardRepo) scan(row pgx.Row) (*models.Card, error) {
 	}
 	c.Difficulty = models.CardDifficulty(difficulty)
 	return &c, nil
+}
+
+func (r *CardRepo) scan(row pgx.Row) (*models.Card, error) {
+	return scanCardAliased(row)
 }
 
 // CreateBatch вставляет все карточки задачи одной транзакцией - частично

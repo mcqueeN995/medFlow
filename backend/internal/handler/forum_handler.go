@@ -113,11 +113,15 @@ func (h *ForumHandler) ListThreads(c *gin.Context) {
 
 // GetThread GET /api/v1/threads/:id
 func (h *ForumHandler) GetThread(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 	id, ok := pathUUID(c, "id")
 	if !ok {
 		return
 	}
-	thread, err := h.forumService.GetThread(c.Request.Context(), id)
+	thread, err := h.forumService.GetThread(c.Request.Context(), id, userID)
 	if err != nil {
 		MapForumServiceError(c, err)
 		return
@@ -184,21 +188,26 @@ func (h *ForumHandler) ReportThread(c *gin.Context) {
 
 // ListComments GET /api/v1/threads/:id/comments
 func (h *ForumHandler) ListComments(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
 	threadID, ok := pathUUID(c, "id")
 	if !ok {
 		return
 	}
 
 	var q struct {
-		Page  int `form:"page,default=1"`
-		Limit int `form:"limit,default=50"`
+		Page  int    `form:"page,default=1"`
+		Limit int    `form:"limit,default=50"`
+		Sort  string `form:"sort,default=new"`
 	}
 	if err := c.ShouldBindQuery(&q); err != nil {
 		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid query params", nil)
 		return
 	}
 
-	pagination, items, err := h.forumService.ListComments(c.Request.Context(), threadID, q.Page, q.Limit)
+	pagination, items, err := h.forumService.ListComments(c.Request.Context(), threadID, userID, q.Page, q.Limit, q.Sort)
 	if err != nil {
 		MapForumServiceError(c, err)
 		return
@@ -283,6 +292,50 @@ func (h *ForumHandler) AddCommentReaction(c *gin.Context) {
 // RemoveCommentReaction DELETE /api/v1/comments/:id/reactions
 func (h *ForumHandler) RemoveCommentReaction(c *gin.Context) {
 	h.removeReaction(c, "id", models.ReactionTargetComment)
+}
+
+// VoteComment POST /api/v1/comments/:id/vote
+func (h *ForumHandler) VoteComment(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+
+	var req dto.VoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	result, err := h.forumService.VoteComment(c.Request.Context(), userID, id, req.Direction)
+	if err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// RemoveCommentVote DELETE /api/v1/comments/:id/vote
+func (h *ForumHandler) RemoveCommentVote(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+	id, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+
+	result, err := h.forumService.RemoveCommentVote(c.Request.Context(), userID, id)
+	if err != nil {
+		MapForumServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // ReportComment POST /api/v1/comments/:id/report

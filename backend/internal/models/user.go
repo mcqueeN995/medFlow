@@ -25,9 +25,15 @@ const (
 )
 
 type User struct {
-	ID              uuid.UUID   `json:"id"`
-	Email           string      `json:"email"`
-	PasswordHash    string      `json:"-"`
+	ID           uuid.UUID `json:"id"`
+	Email        string    `json:"email"`
+	PasswordHash string    `json:"-"`
+	// Login - отдельный от email и nickname идентификатор для входа: задаётся
+	// при регистрации, уникален, меняется только через подтверждение кодом на
+	// email (см. AuthService.Login и UserService.RequestLoginChange). Nickname,
+	// в отличие от него, - просто отображаемое имя, свободно редактируемое и
+	// для входа не используемое.
+	Login           string      `json:"login"`
 	Nickname        string      `json:"nickname"`
 	Role            UserRole    `json:"role"`
 	University      *University `json:"university,omitempty"`

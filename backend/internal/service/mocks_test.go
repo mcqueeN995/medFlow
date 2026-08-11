@@ -17,9 +17,12 @@ import (
 type mockUserRepository struct {
 	createFn         func(ctx context.Context, user *models.User) error
 	findByEmailFn    func(ctx context.Context, email string) (*models.User, error)
+	findByLoginFn    func(ctx context.Context, login string) (*models.User, error)
 	findByNicknameFn func(ctx context.Context, nickname string) (*models.User, error)
 	findByIDFn       func(ctx context.Context, id uuid.UUID) (*models.User, error)
 	updateFn         func(ctx context.Context, id uuid.UUID, nickname string, university *models.University, course *int, faculty *string) (*models.User, error)
+	updateLoginFn    func(ctx context.Context, id uuid.UUID, login string) (*models.User, error)
+	updatePasswordFn func(ctx context.Context, id uuid.UUID, passwordHash string) error
 	softDeleteFn     func(ctx context.Context, id uuid.UUID) error
 	findPublicByIDFn func(ctx context.Context, id uuid.UUID) (*models.PublicUser, error)
 	adminListFn      func(ctx context.Context, f models.AdminUserListFilter) ([]models.User, int, error)
@@ -38,6 +41,20 @@ func (m *mockUserRepository) Create(ctx context.Context, user *models.User) erro
 func (m *mockUserRepository) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	if m.findByEmailFn != nil {
 		return m.findByEmailFn(ctx, email)
+	}
+	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepository) FindByLogin(ctx context.Context, login string) (*models.User, error) {
+	if m.findByLoginFn != nil {
+		return m.findByLoginFn(ctx, login)
+	}
+	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepository) UpdateLogin(ctx context.Context, id uuid.UUID, login string) (*models.User, error) {
+	if m.updateLoginFn != nil {
+		return m.updateLoginFn(ctx, id, login)
 	}
 	return nil, models.ErrUserNotFound
 }
@@ -61,6 +78,13 @@ func (m *mockUserRepository) Update(ctx context.Context, id uuid.UUID, nickname 
 		return m.updateFn(ctx, id, nickname, university, course, faculty)
 	}
 	return nil, models.ErrUserNotFound
+}
+
+func (m *mockUserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	if m.updatePasswordFn != nil {
+		return m.updatePasswordFn(ctx, id, passwordHash)
+	}
+	return nil
 }
 
 func (m *mockUserRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
@@ -151,13 +175,13 @@ func (m *mockTokenRepository) DeleteExpired(ctx context.Context) (int64, error) 
 
 // mockThreadRepository ручной мок services.ThreadRepository
 type mockThreadRepository struct {
-	createFn         func(ctx context.Context, authorID uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
-	findByIDFn       func(ctx context.Context, id uuid.UUID) (*models.Thread, error)
-	incrementViewsFn func(ctx context.Context, id uuid.UUID) error
-	updateFn         func(ctx context.Context, id uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
-	softDeleteFn     func(ctx context.Context, id uuid.UUID) error
-	listFn           func(ctx context.Context, f models.ThreadListFilter) ([]models.Thread, int, error)
-	hideFn           func(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Thread, error)
+	createFn                            func(ctx context.Context, authorID uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
+	findByIDFn                          func(ctx context.Context, id uuid.UUID) (*models.Thread, error)
+	incrementViewsIfNotRecentlyViewedFn func(ctx context.Context, threadID, userID uuid.UUID) error
+	updateFn                            func(ctx context.Context, id uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
+	softDeleteFn                        func(ctx context.Context, id uuid.UUID) error
+	listFn                              func(ctx context.Context, f models.ThreadListFilter) ([]models.Thread, int, error)
+	hideFn                              func(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Thread, error)
 }
 
 func (m *mockThreadRepository) Create(ctx context.Context, authorID uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error) {
@@ -174,9 +198,9 @@ func (m *mockThreadRepository) FindByID(ctx context.Context, id uuid.UUID) (*mod
 	return nil, models.ErrThreadNotFound
 }
 
-func (m *mockThreadRepository) IncrementViews(ctx context.Context, id uuid.UUID) error {
-	if m.incrementViewsFn != nil {
-		return m.incrementViewsFn(ctx, id)
+func (m *mockThreadRepository) IncrementViewsIfNotRecentlyViewed(ctx context.Context, threadID, userID uuid.UUID) error {
+	if m.incrementViewsIfNotRecentlyViewedFn != nil {
+		return m.incrementViewsIfNotRecentlyViewedFn(ctx, threadID, userID)
 	}
 	return nil
 }
@@ -215,7 +239,7 @@ type mockCommentRepository struct {
 	findByIDFn     func(ctx context.Context, id uuid.UUID) (*models.Comment, error)
 	updateFn       func(ctx context.Context, id uuid.UUID, content string) (*models.Comment, error)
 	softDeleteFn   func(ctx context.Context, id, threadID uuid.UUID) error
-	listByThreadFn func(ctx context.Context, threadID uuid.UUID, page, limit int) ([]models.Comment, int, error)
+	listByThreadFn func(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error)
 	hideFn         func(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error)
 }
 
@@ -254,17 +278,20 @@ func (m *mockCommentRepository) Hide(ctx context.Context, id, hiddenBy uuid.UUID
 	return nil, models.ErrCommentNotFound
 }
 
-func (m *mockCommentRepository) ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int) ([]models.Comment, int, error) {
+func (m *mockCommentRepository) ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error) {
 	if m.listByThreadFn != nil {
-		return m.listByThreadFn(ctx, threadID, page, limit)
+		return m.listByThreadFn(ctx, threadID, page, limit, sort)
 	}
 	return nil, 0, nil
 }
 
 // mockReactionRepository ручной мок services.ReactionRepository
 type mockReactionRepository struct {
-	upsertFn func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, emoji string) (*models.Reaction, error)
-	deleteFn func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error
+	upsertFn        func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, emoji string) (*models.Reaction, error)
+	deleteFn        func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error
+	upsertVoteFn    func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, direction string) (*models.Reaction, error)
+	deleteVoteFn    func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error
+	voteSummariesFn func(ctx context.Context, targetType models.ReactionTargetType, targetIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID]models.VoteSummary, error)
 }
 
 func (m *mockReactionRepository) Upsert(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, emoji string) (*models.Reaction, error) {
@@ -279,6 +306,27 @@ func (m *mockReactionRepository) Delete(ctx context.Context, userID uuid.UUID, t
 		return m.deleteFn(ctx, userID, targetType, targetID)
 	}
 	return nil
+}
+
+func (m *mockReactionRepository) UpsertVote(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, direction string) (*models.Reaction, error) {
+	if m.upsertVoteFn != nil {
+		return m.upsertVoteFn(ctx, userID, targetType, targetID, direction)
+	}
+	return &models.Reaction{UserID: userID, TargetType: targetType, TargetID: targetID, Emoji: direction, Kind: models.ReactionKindVote}, nil
+}
+
+func (m *mockReactionRepository) DeleteVote(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error {
+	if m.deleteVoteFn != nil {
+		return m.deleteVoteFn(ctx, userID, targetType, targetID)
+	}
+	return nil
+}
+
+func (m *mockReactionRepository) VoteSummaries(ctx context.Context, targetType models.ReactionTargetType, targetIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID]models.VoteSummary, error) {
+	if m.voteSummariesFn != nil {
+		return m.voteSummariesFn(ctx, targetType, targetIDs, viewerID)
+	}
+	return map[uuid.UUID]models.VoteSummary{}, nil
 }
 
 // mockReportRepository ручной мок services.ReportRepository
@@ -477,6 +525,10 @@ type mockCardTaskRepository struct {
 	findDoneByCacheKeyFn func(ctx context.Context, cacheKey string) (*models.CardTask, error)
 	countActiveFn        func(ctx context.Context, userID uuid.UUID) (int, error)
 	countPendingBeforeFn func(ctx context.Context, createdAt time.Time) (int, error)
+	listCatalogFeedFn    func(ctx context.Context, f models.CardCatalogFeedFilter) ([]models.CardCatalogEntry, int, error)
+	setShareTokenFn      func(ctx context.Context, taskID uuid.UUID, token string) error
+	clearShareTokenFn    func(ctx context.Context, taskID uuid.UUID) error
+	findByShareTokenFn   func(ctx context.Context, token string) (*models.CardTask, error)
 }
 
 func (m *mockCardTaskRepository) Create(ctx context.Context, t *models.CardTask) (*models.CardTask, error) {
@@ -545,6 +597,34 @@ func (m *mockCardTaskRepository) CountPendingBefore(ctx context.Context, created
 	return 0, nil
 }
 
+func (m *mockCardTaskRepository) ListCatalogFeed(ctx context.Context, f models.CardCatalogFeedFilter) ([]models.CardCatalogEntry, int, error) {
+	if m.listCatalogFeedFn != nil {
+		return m.listCatalogFeedFn(ctx, f)
+	}
+	return nil, 0, nil
+}
+
+func (m *mockCardTaskRepository) SetShareToken(ctx context.Context, taskID uuid.UUID, token string) error {
+	if m.setShareTokenFn != nil {
+		return m.setShareTokenFn(ctx, taskID, token)
+	}
+	return nil
+}
+
+func (m *mockCardTaskRepository) ClearShareToken(ctx context.Context, taskID uuid.UUID) error {
+	if m.clearShareTokenFn != nil {
+		return m.clearShareTokenFn(ctx, taskID)
+	}
+	return nil
+}
+
+func (m *mockCardTaskRepository) FindByShareToken(ctx context.Context, token string) (*models.CardTask, error) {
+	if m.findByShareTokenFn != nil {
+		return m.findByShareTokenFn(ctx, token)
+	}
+	return nil, models.ErrCardTaskNotFound
+}
+
 // mockCardRepository ручной мок services.CardRepository
 type mockCardRepository struct {
 	createBatchFn          func(ctx context.Context, cards []models.Card) ([]models.Card, error)
@@ -603,6 +683,8 @@ type mockCardProgressRepository struct {
 	countDueForUserFn           func(ctx context.Context, userID uuid.UUID) (int, error)
 	statsForUserFn              func(ctx context.Context, userID uuid.UUID) (models.CardsStats, error)
 	distinctReviewDaysForUserFn func(ctx context.Context, userID uuid.UUID, limit int) ([]time.Time, error)
+	listDueFavoritesForUserFn   func(ctx context.Context, userID uuid.UUID, limit int) ([]models.ReviewCard, error)
+	countDueFavoritesForUserFn  func(ctx context.Context, userID uuid.UUID) (int, error)
 }
 
 func (m *mockCardProgressRepository) CreateBatchDefault(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) error {
@@ -640,6 +722,20 @@ func (m *mockCardProgressRepository) CountDueForUser(ctx context.Context, userID
 	return 0, nil
 }
 
+func (m *mockCardProgressRepository) ListDueFavoritesForUser(ctx context.Context, userID uuid.UUID, limit int) ([]models.ReviewCard, error) {
+	if m.listDueFavoritesForUserFn != nil {
+		return m.listDueFavoritesForUserFn(ctx, userID, limit)
+	}
+	return nil, nil
+}
+
+func (m *mockCardProgressRepository) CountDueFavoritesForUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	if m.countDueFavoritesForUserFn != nil {
+		return m.countDueFavoritesForUserFn(ctx, userID)
+	}
+	return 0, nil
+}
+
 func (m *mockCardProgressRepository) StatsForUser(ctx context.Context, userID uuid.UUID) (models.CardsStats, error) {
 	if m.statsForUserFn != nil {
 		return m.statsForUserFn(ctx, userID)
@@ -652,6 +748,86 @@ func (m *mockCardProgressRepository) DistinctReviewDaysForUser(ctx context.Conte
 		return m.distinctReviewDaysForUserFn(ctx, userID, limit)
 	}
 	return nil, nil
+}
+
+// mockCardFavoriteRepository ручной мок services.CardFavoriteRepository
+type mockCardFavoriteRepository struct {
+	addFn              func(ctx context.Context, userID, cardID uuid.UUID) error
+	removeFn           func(ctx context.Context, userID, cardID uuid.UUID) error
+	listForUserFn      func(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error)
+	isFavoritedBatchFn func(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
+func (m *mockCardFavoriteRepository) Add(ctx context.Context, userID, cardID uuid.UUID) error {
+	if m.addFn != nil {
+		return m.addFn(ctx, userID, cardID)
+	}
+	return nil
+}
+
+func (m *mockCardFavoriteRepository) Remove(ctx context.Context, userID, cardID uuid.UUID) error {
+	if m.removeFn != nil {
+		return m.removeFn(ctx, userID, cardID)
+	}
+	return nil
+}
+
+func (m *mockCardFavoriteRepository) ListForUser(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error) {
+	if m.listForUserFn != nil {
+		return m.listForUserFn(ctx, userID, page, limit)
+	}
+	return nil, 0, nil
+}
+
+func (m *mockCardFavoriteRepository) IsFavoritedBatch(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+	if m.isFavoritedBatchFn != nil {
+		return m.isFavoritedBatchFn(ctx, userID, cardIDs)
+	}
+	return map[uuid.UUID]bool{}, nil
+}
+
+// mockCardRatingRepository ручной мок services.CardRatingRepository
+type mockCardRatingRepository struct {
+	upsertFn                 func(ctx context.Context, userID, cardID uuid.UUID, stars int) error
+	deleteFn                 func(ctx context.Context, userID, cardID uuid.UUID) error
+	aggregateForCardsBatchFn func(ctx context.Context, cardIDs []uuid.UUID) (map[uuid.UUID]models.CardRatingAggregate, error)
+	myRatingsBatchFn         func(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]int, error)
+	listRatedByUserFn        func(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error)
+}
+
+func (m *mockCardRatingRepository) Upsert(ctx context.Context, userID, cardID uuid.UUID, stars int) error {
+	if m.upsertFn != nil {
+		return m.upsertFn(ctx, userID, cardID, stars)
+	}
+	return nil
+}
+
+func (m *mockCardRatingRepository) Delete(ctx context.Context, userID, cardID uuid.UUID) error {
+	if m.deleteFn != nil {
+		return m.deleteFn(ctx, userID, cardID)
+	}
+	return nil
+}
+
+func (m *mockCardRatingRepository) AggregateForCardsBatch(ctx context.Context, cardIDs []uuid.UUID) (map[uuid.UUID]models.CardRatingAggregate, error) {
+	if m.aggregateForCardsBatchFn != nil {
+		return m.aggregateForCardsBatchFn(ctx, cardIDs)
+	}
+	return map[uuid.UUID]models.CardRatingAggregate{}, nil
+}
+
+func (m *mockCardRatingRepository) MyRatingsBatch(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	if m.myRatingsBatchFn != nil {
+		return m.myRatingsBatchFn(ctx, userID, cardIDs)
+	}
+	return map[uuid.UUID]int{}, nil
+}
+
+func (m *mockCardRatingRepository) ListRatedByUser(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error) {
+	if m.listRatedByUserFn != nil {
+		return m.listRatedByUserFn(ctx, userID, page, limit)
+	}
+	return nil, 0, nil
 }
 
 // mockTextbookChunkRepository ручной мок services.TextbookChunkRepository
@@ -846,6 +1022,92 @@ func (m *mockPushSender) Send(ctx context.Context, sub models.PushSubscription, 
 	m.sent = append(m.sent, sub)
 	if m.sendFn != nil {
 		return m.sendFn(ctx, sub, vapid, payload)
+	}
+	return nil
+}
+
+// mockLoginChangeRepository ручной мок services.LoginChangeRepository.
+type mockLoginChangeRepository struct {
+	saveFn           func(ctx context.Context, req *models.LoginChangeRequest) error
+	findByCodeHashFn func(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error)
+	deleteByIDFn     func(ctx context.Context, id uuid.UUID) error
+	deleteByUserIDFn func(ctx context.Context, userID uuid.UUID) error
+}
+
+func (m *mockLoginChangeRepository) Save(ctx context.Context, req *models.LoginChangeRequest) error {
+	if m.saveFn != nil {
+		return m.saveFn(ctx, req)
+	}
+	return nil
+}
+
+func (m *mockLoginChangeRepository) FindByCodeHash(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error) {
+	if m.findByCodeHashFn != nil {
+		return m.findByCodeHashFn(ctx, codeHash)
+	}
+	return nil, models.ErrLoginChangeRequestNotFound
+}
+
+func (m *mockLoginChangeRepository) DeleteByID(ctx context.Context, id uuid.UUID) error {
+	if m.deleteByIDFn != nil {
+		return m.deleteByIDFn(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockLoginChangeRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	if m.deleteByUserIDFn != nil {
+		return m.deleteByUserIDFn(ctx, userID)
+	}
+	return nil
+}
+
+// mockPasswordResetRepository ручной мок services.PasswordResetRepository.
+type mockPasswordResetRepository struct {
+	saveFn           func(ctx context.Context, req *models.PasswordResetRequest) error
+	findByCodeHashFn func(ctx context.Context, codeHash string) (*models.PasswordResetRequest, error)
+	deleteByIDFn     func(ctx context.Context, id uuid.UUID) error
+	deleteByUserIDFn func(ctx context.Context, userID uuid.UUID) error
+}
+
+func (m *mockPasswordResetRepository) Save(ctx context.Context, req *models.PasswordResetRequest) error {
+	if m.saveFn != nil {
+		return m.saveFn(ctx, req)
+	}
+	return nil
+}
+
+func (m *mockPasswordResetRepository) FindByCodeHash(ctx context.Context, codeHash string) (*models.PasswordResetRequest, error) {
+	if m.findByCodeHashFn != nil {
+		return m.findByCodeHashFn(ctx, codeHash)
+	}
+	return nil, models.ErrPasswordResetRequestNotFound
+}
+
+func (m *mockPasswordResetRepository) DeleteByID(ctx context.Context, id uuid.UUID) error {
+	if m.deleteByIDFn != nil {
+		return m.deleteByIDFn(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockPasswordResetRepository) DeleteByUserID(ctx context.Context, userID uuid.UUID) error {
+	if m.deleteByUserIDFn != nil {
+		return m.deleteByUserIDFn(ctx, userID)
+	}
+	return nil
+}
+
+// mockEmailSender ручной мок services.EmailSender - не бьёт по реальному SMTP.
+type mockEmailSender struct {
+	sendFn func(to, subject, body string) error
+	sent   []string
+}
+
+func (m *mockEmailSender) Send(to, subject, body string) error {
+	m.sent = append(m.sent, to)
+	if m.sendFn != nil {
+		return m.sendFn(to, subject, body)
 	}
 	return nil
 }

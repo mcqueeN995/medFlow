@@ -75,8 +75,8 @@ func (s *ForumService) ListThreads(ctx context.Context, f models.ThreadListFilte
 	return &pagination, items, nil
 }
 
-func (s *ForumService) GetThread(ctx context.Context, id uuid.UUID) (*dto.Thread, error) {
-	if err := s.threadRepo.IncrementViews(ctx, id); err != nil {
+func (s *ForumService) GetThread(ctx context.Context, id, viewerID uuid.UUID) (*dto.Thread, error) {
+	if err := s.threadRepo.IncrementViewsIfNotRecentlyViewed(ctx, id, viewerID); err != nil {
 		return nil, s.mapThreadErr(err)
 	}
 	thread, err := s.threadRepo.FindByID(ctx, id)
@@ -186,7 +186,7 @@ func (s *ForumService) CreateComment(ctx context.Context, threadID, authorID uui
 		return nil, err
 	}
 	s.notifyReply(ctx, authorID, thread, parent)
-	out := dto.ToComment(comment)
+	out := dto.ToComment(comment, nil)
 	return &out, nil
 }
 
@@ -206,7 +206,7 @@ func (s *ForumService) notifyReply(ctx context.Context, authorID uuid.UUID, thre
 	}
 }
 
-func (s *ForumService) ListComments(ctx context.Context, threadID uuid.UUID, page, limit int) (*dto.Pagination, []dto.CommentTree, error) {
+func (s *ForumService) ListComments(ctx context.Context, threadID, viewerID uuid.UUID, page, limit int, sort string) (*dto.Pagination, []dto.CommentTree, error) {
 	if _, err := s.threadRepo.FindByID(ctx, threadID); err != nil {
 		return nil, nil, s.mapThreadErr(err)
 	}
@@ -216,19 +216,69 @@ func (s *ForumService) ListComments(ctx context.Context, threadID uuid.UUID, pag
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
+	if sort != "best" {
+		sort = "new"
+	}
 
-	comments, total, err := s.commentRepo.ListByThread(ctx, threadID, page, limit)
+	comments, total, err := s.commentRepo.ListByThread(ctx, threadID, page, limit, sort)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Батч голосов для верхнего уровня и реплаев разом - по аналогии с
+	// repliesByParent в CommentRepo.ListByThread: один запрос на список ID
+	// вместо N+1 при обогащении каждого комментария по отдельности.
+	allIDs := make([]uuid.UUID, 0, len(comments)*2)
+	for i := range comments {
+		allIDs = append(allIDs, comments[i].ID)
+		for _, reply := range comments[i].Replies {
+			allIDs = append(allIDs, reply.ID)
+		}
+	}
+	summaries, err := s.reactionRepo.VoteSummaries(ctx, models.ReactionTargetComment, allIDs, viewerID)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	items := make([]dto.CommentTree, len(comments))
 	for i := range comments {
-		items[i] = dto.ToCommentTree(&comments[i])
+		items[i] = dto.ToCommentTree(&comments[i], summaries)
 	}
 
 	pagination := dto.NewPagination(page, limit, total)
 	return &pagination, items, nil
+}
+
+// VoteComment - голос up/down. В отличие от AddReaction (эмодзи-лайк),
+// сосуществует с ним независимо на одном комментарии (kind='vote' vs
+// kind='emoji', см. миграцию 000016_reactions_kind).
+func (s *ForumService) VoteComment(ctx context.Context, userID, commentID uuid.UUID, direction string) (*dto.VoteResult, error) {
+	if _, err := s.commentRepo.FindByID(ctx, commentID); err != nil {
+		return nil, s.mapCommentErr(err)
+	}
+	if _, err := s.reactionRepo.UpsertVote(ctx, userID, models.ReactionTargetComment, commentID, direction); err != nil {
+		return nil, err
+	}
+	return s.commentVoteResult(ctx, userID, commentID)
+}
+
+func (s *ForumService) RemoveCommentVote(ctx context.Context, userID, commentID uuid.UUID) (*dto.VoteResult, error) {
+	if err := s.reactionRepo.DeleteVote(ctx, userID, models.ReactionTargetComment, commentID); err != nil {
+		if errors.Is(err, models.ErrReactionNotFound) {
+			return nil, ErrReactionNotFound
+		}
+		return nil, err
+	}
+	return s.commentVoteResult(ctx, userID, commentID)
+}
+
+func (s *ForumService) commentVoteResult(ctx context.Context, userID, commentID uuid.UUID) (*dto.VoteResult, error) {
+	summaries, err := s.reactionRepo.VoteSummaries(ctx, models.ReactionTargetComment, []uuid.UUID{commentID}, userID)
+	if err != nil {
+		return nil, err
+	}
+	summary := summaries[commentID]
+	return &dto.VoteResult{Score: summary.Score, MyVote: summary.MyVote}, nil
 }
 
 func (s *ForumService) UpdateComment(ctx context.Context, id, userID uuid.UUID, content string) (*dto.Comment, error) {
@@ -244,7 +294,7 @@ func (s *ForumService) UpdateComment(ctx context.Context, id, userID uuid.UUID, 
 	if err != nil {
 		return nil, s.mapCommentErr(err)
 	}
-	out := dto.ToComment(updated)
+	out := dto.ToComment(updated, nil)
 	return &out, nil
 }
 
@@ -277,7 +327,7 @@ func (s *ForumService) AdminHideComment(ctx context.Context, actorID, id uuid.UU
 		return nil, s.mapCommentErr(err)
 	}
 	s.writeAudit(ctx, actorID, models.AuditCommentHide, "comment", id, &reason)
-	out := dto.ToComment(hidden)
+	out := dto.ToComment(hidden, nil)
 	return &out, nil
 }
 

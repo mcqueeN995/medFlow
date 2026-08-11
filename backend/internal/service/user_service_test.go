@@ -19,7 +19,7 @@ func TestUserService_Me_Success(t *testing.T) {
 			return &models.User{ID: userID, Nickname: "nik", Role: models.RoleUser}, nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	profile, err := svc.Me(context.Background(), userID)
 	if err != nil {
@@ -36,7 +36,7 @@ func TestUserService_Me_NotFound(t *testing.T) {
 			return nil, models.ErrUserNotFound
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	_, err := svc.Me(context.Background(), uuid.New())
 	if !errors.Is(err, ErrUserNotFound) {
@@ -61,7 +61,7 @@ func TestUserService_UpdateProfile_PartialFieldsPreserved(t *testing.T) {
 			return &models.User{ID: id, Nickname: nickname, Faculty: faculty}, nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	newNick := "new_nick"
 	profile, err := svc.UpdateProfile(context.Background(), userID, dto.UpdateProfileRequest{Nickname: &newNick})
@@ -83,7 +83,7 @@ func TestUserService_UpdateProfile_NicknameTaken(t *testing.T) {
 			return nil, models.ErrNicknameExists
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	taken := "taken_nick"
 	_, err := svc.UpdateProfile(context.Background(), userID, dto.UpdateProfileRequest{Nickname: &taken})
@@ -103,7 +103,7 @@ func TestUserService_DeleteAccount_WrongPassword(t *testing.T) {
 			return &models.User{ID: userID, PasswordHash: hash}, nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	err = svc.DeleteAccount(context.Background(), userID, "wrong-password")
 	if !errors.Is(err, ErrInvalidCreds) {
@@ -134,7 +134,7 @@ func TestUserService_DeleteAccount_Success_RevokesTokens(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewUserService(userRepo, tokenRepo, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, tokenRepo, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	if err := svc.DeleteAccount(context.Background(), userID, "correct-password"); err != nil {
 		t.Fatalf("DeleteAccount() error = %v", err)
@@ -154,7 +154,7 @@ func TestUserService_PublicProfile_Success(t *testing.T) {
 			return &models.PublicUser{ID: userID, Nickname: "nik", ThreadsCount: 3}, nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	profile, err := svc.PublicProfile(context.Background(), userID)
 	if err != nil {
@@ -173,7 +173,7 @@ func TestUserService_AdminList(t *testing.T) {
 			return []models.User{{ID: uuid.New(), Nickname: "a"}}, 1, nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	role := models.RoleModerator
 	pagination, items, err := svc.AdminList(context.Background(), models.AdminUserListFilter{Role: &role})
@@ -205,7 +205,7 @@ func TestUserService_AdminBan_WritesAuditLog(t *testing.T) {
 			return nil
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo)
+	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	out, err := svc.AdminBan(context.Background(), actorID, targetID, "нарушение правил")
 	if err != nil {
@@ -233,7 +233,7 @@ func TestUserService_AdminUnban_WritesAuditLog(t *testing.T) {
 	auditRepo := &mockAuditLogRepository{
 		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo)
+	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	if _, err := svc.AdminUnban(context.Background(), actorID, targetID); err != nil {
 		t.Fatalf("AdminUnban() error = %v", err)
@@ -254,7 +254,7 @@ func TestUserService_AdminChangeRole_WritesAuditLog(t *testing.T) {
 	auditRepo := &mockAuditLogRepository{
 		createFn: func(ctx context.Context, entry *models.AuditLog) error { auditEntry = entry; return nil },
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo)
+	svc := NewUserService(userRepo, &mockTokenRepository{}, auditRepo, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	out, err := svc.AdminChangeRole(context.Background(), actorID, targetID, models.RoleModerator)
 	if err != nil {
@@ -274,7 +274,7 @@ func TestUserService_AdminBan_NotFound(t *testing.T) {
 			return nil, models.ErrUserNotFound
 		},
 	}
-	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{})
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
 
 	_, err := svc.AdminBan(context.Background(), uuid.New(), uuid.New(), "reason")
 	if !errors.Is(err, ErrUserNotFound) {
@@ -285,4 +285,139 @@ func TestUserService_AdminBan_NotFound(t *testing.T) {
 func ptrTime() *time.Time {
 	now := time.Now()
 	return &now
+}
+
+func TestUserService_RequestLoginChange_WrongPassword(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.User, error) {
+			return &models.User{ID: userID, Email: "u@medflow.local", PasswordHash: hashPasswordForTest("password123")}, nil
+		},
+	}
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
+
+	err := svc.RequestLoginChange(context.Background(), userID, dto.RequestLoginChangeRequest{NewLogin: "new_login", CurrentPassword: "wrong"})
+	if !errors.Is(err, ErrInvalidCreds) {
+		t.Fatalf("RequestLoginChange() error = %v, want ErrInvalidCreds", err)
+	}
+}
+
+func TestUserService_RequestLoginChange_LoginTaken(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.User, error) {
+			return &models.User{ID: userID, Email: "u@medflow.local", PasswordHash: hashPasswordForTest("password123")}, nil
+		},
+		findByLoginFn: func(ctx context.Context, login string) (*models.User, error) {
+			return &models.User{ID: uuid.New()}, nil // занят другим пользователем
+		},
+	}
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
+
+	err := svc.RequestLoginChange(context.Background(), userID, dto.RequestLoginChangeRequest{NewLogin: "taken_login", CurrentPassword: "password123"})
+	if !errors.Is(err, ErrLoginExists) {
+		t.Fatalf("RequestLoginChange() error = %v, want ErrLoginExists", err)
+	}
+}
+
+func TestUserService_RequestLoginChange_Success_SendsCodeToCurrentEmail(t *testing.T) {
+	userID := uuid.New()
+	userRepo := &mockUserRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.User, error) {
+			return &models.User{ID: userID, Email: "owner@medflow.local", PasswordHash: hashPasswordForTest("password123")}, nil
+		},
+	}
+	var savedReq *models.LoginChangeRequest
+	loginChangeRepo := &mockLoginChangeRepository{
+		saveFn: func(ctx context.Context, req *models.LoginChangeRequest) error {
+			savedReq = req
+			return nil
+		},
+	}
+	emailSender := &mockEmailSender{}
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, loginChangeRepo, emailSender)
+
+	err := svc.RequestLoginChange(context.Background(), userID, dto.RequestLoginChangeRequest{NewLogin: "new_login", CurrentPassword: "password123"})
+	if err != nil {
+		t.Fatalf("RequestLoginChange() error = %v", err)
+	}
+	if savedReq == nil || savedReq.NewLogin != "new_login" || savedReq.UserID != userID {
+		t.Fatalf("saved login change request = %+v, want NewLogin=new_login UserID=%v", savedReq, userID)
+	}
+	if len(emailSender.sent) != 1 || emailSender.sent[0] != "owner@medflow.local" {
+		t.Fatalf("email sent to = %v, want [owner@medflow.local] (текущий, не новый, email)", emailSender.sent)
+	}
+}
+
+func TestUserService_ConfirmLoginChange_InvalidCode(t *testing.T) {
+	userID := uuid.New()
+	svc := NewUserService(&mockUserRepository{}, &mockTokenRepository{}, &mockAuditLogRepository{}, &mockLoginChangeRepository{}, &mockEmailSender{})
+
+	_, err := svc.ConfirmLoginChange(context.Background(), userID, "000000")
+	if !errors.Is(err, ErrLoginChangeCodeInvalid) {
+		t.Fatalf("ConfirmLoginChange() error = %v, want ErrLoginChangeCodeInvalid", err)
+	}
+}
+
+func TestUserService_ConfirmLoginChange_CodeBelongsToAnotherUser(t *testing.T) {
+	userID := uuid.New()
+	loginChangeRepo := &mockLoginChangeRepository{
+		findByCodeHashFn: func(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error) {
+			return &models.LoginChangeRequest{ID: uuid.New(), UserID: uuid.New(), NewLogin: "x", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		},
+	}
+	svc := NewUserService(&mockUserRepository{}, &mockTokenRepository{}, &mockAuditLogRepository{}, loginChangeRepo, &mockEmailSender{})
+
+	_, err := svc.ConfirmLoginChange(context.Background(), userID, "123456")
+	if !errors.Is(err, ErrLoginChangeCodeInvalid) {
+		t.Fatalf("ConfirmLoginChange() error = %v, want ErrLoginChangeCodeInvalid (чужой запрос)", err)
+	}
+}
+
+func TestUserService_ConfirmLoginChange_Expired(t *testing.T) {
+	userID := uuid.New()
+	reqID := uuid.New()
+	var deletedID uuid.UUID
+	loginChangeRepo := &mockLoginChangeRepository{
+		findByCodeHashFn: func(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error) {
+			return &models.LoginChangeRequest{ID: reqID, UserID: userID, NewLogin: "x", ExpiresAt: time.Now().Add(-time.Minute)}, nil
+		},
+		deleteByIDFn: func(ctx context.Context, id uuid.UUID) error {
+			deletedID = id
+			return nil
+		},
+	}
+	svc := NewUserService(&mockUserRepository{}, &mockTokenRepository{}, &mockAuditLogRepository{}, loginChangeRepo, &mockEmailSender{})
+
+	_, err := svc.ConfirmLoginChange(context.Background(), userID, "123456")
+	if !errors.Is(err, ErrLoginChangeCodeInvalid) {
+		t.Fatalf("ConfirmLoginChange() error = %v, want ErrLoginChangeCodeInvalid", err)
+	}
+	if deletedID != reqID {
+		t.Errorf("expired request was not cleaned up: deletedID = %v, want %v", deletedID, reqID)
+	}
+}
+
+func TestUserService_ConfirmLoginChange_Success(t *testing.T) {
+	userID := uuid.New()
+	reqID := uuid.New()
+	loginChangeRepo := &mockLoginChangeRepository{
+		findByCodeHashFn: func(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error) {
+			return &models.LoginChangeRequest{ID: reqID, UserID: userID, NewLogin: "new_login", ExpiresAt: time.Now().Add(time.Minute)}, nil
+		},
+	}
+	userRepo := &mockUserRepository{
+		updateLoginFn: func(ctx context.Context, id uuid.UUID, login string) (*models.User, error) {
+			return &models.User{ID: id, Login: login}, nil
+		},
+	}
+	svc := NewUserService(userRepo, &mockTokenRepository{}, &mockAuditLogRepository{}, loginChangeRepo, &mockEmailSender{})
+
+	profile, err := svc.ConfirmLoginChange(context.Background(), userID, "123456")
+	if err != nil {
+		t.Fatalf("ConfirmLoginChange() error = %v", err)
+	}
+	if profile.Login != "new_login" {
+		t.Errorf("Login = %q, want new_login", profile.Login)
+	}
 }

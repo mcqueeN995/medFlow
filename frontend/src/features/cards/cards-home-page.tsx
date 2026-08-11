@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { BrainCircuit, Flame, Layers, Plus, Target } from 'lucide-react'
+import { BrainCircuit, Flame, Heart, Layers, LibraryBig, Plus, Target } from 'lucide-react'
 import { getCardsStats, getCardsTasks } from '@/api/generated/medFlowAPI'
 import { CardTaskStatus } from '@/api/generated'
 import type { CardTask, CardsStats } from '@/api/generated'
@@ -51,7 +51,13 @@ export function CardsHomePage() {
           <h1 className="text-2xl font-bold text-primary">ИИ-карточки</h1>
           <p className="text-sm text-muted-foreground">Генерация из ваших материалов + интервальное повторение (SM-2)</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Link to="/cards/catalog" className={cn(buttonVariants({ variant: 'outline' }), 'h-9 rounded-full px-4')}>
+            <LibraryBig className="size-4" /> Каталог
+          </Link>
+          <Link to="/cards/favorites" className={cn(buttonVariants({ variant: 'outline' }), 'h-9 rounded-full px-4')}>
+            <Heart className="size-4" /> Избранное
+          </Link>
           <Link to="/cards/review" className={cn(buttonVariants({ variant: 'outline' }), 'h-9 rounded-full px-4')}>
             <BrainCircuit className="size-4" /> Повторить
           </Link>
@@ -80,7 +86,7 @@ export function CardsHomePage() {
       )}
 
       <div className="flex flex-col gap-2">
-        <h2 className="text-sm font-semibold text-foreground">Мои задачи</h2>
+        <h2 className="text-sm font-semibold text-foreground">Мои карточки</h2>
         {loading ? (
           <div className="flex flex-col gap-2">
             {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)}

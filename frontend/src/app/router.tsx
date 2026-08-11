@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { UserRole } from '@/api/generated'
 import { LoginPage } from '@/features/auth/login-page'
 import { RegisterPage } from '@/features/auth/register-page'
+import { ForgotPasswordPage } from '@/features/auth/forgot-password-page'
 import { TermsPage } from '@/features/auth/terms-page'
 import { PrivacyPage } from '@/features/auth/privacy-page'
 
@@ -36,8 +37,15 @@ function lazyPage(loader: () => Promise<{ default: ComponentType<Record<string, 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
+  { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/terms', element: <TermsPage /> },
   { path: '/privacy', element: <PrivacyPage /> },
+  {
+    // Публичная страница расшаренного набора карточек - вне AppShell/auth,
+    // как и /login (см. CardService.GetSharedTask - без авторизации на бэкенде).
+    path: '/shared/:token',
+    element: lazyPage(() => import('@/features/cards/shared-task-page').then((m) => ({ default: m.SharedTaskPage }))),
+  },
   {
     // AppShell больше не требует входа целиком — гость видит навигацию и
     // публичные разделы (библиотека, навигатор), см. роль guest в ТЗ.
@@ -100,6 +108,14 @@ export const router = createBrowserRouter([
             path: 'tasks/:id',
             element: lazyPage(() => import('@/features/cards/task-detail-page').then((m) => ({ default: m.TaskDetailPage }))),
           },
+          {
+            path: 'catalog',
+            element: lazyPage(() => import('@/features/cards/catalog-feed-page').then((m) => ({ default: m.CatalogFeedPage }))),
+          },
+          {
+            path: 'favorites',
+            element: lazyPage(() => import('@/features/cards/favorites-page').then((m) => ({ default: m.FavoritesPage }))),
+          },
         ],
       },
       {
@@ -141,6 +157,12 @@ export const router = createBrowserRouter([
           {
             index: true,
             element: lazyPage(() => import('@/features/profile/profile-page').then((m) => ({ default: m.ProfilePage }))),
+          },
+          {
+            // Не добавлен в nav-items.ts намеренно - второстепенная страница,
+            // доступна только по ссылке из профиля.
+            path: 'rated-cards',
+            element: lazyPage(() => import('@/features/profile/rated-cards-page').then((m) => ({ default: m.RatedCardsPage }))),
           },
         ],
       },

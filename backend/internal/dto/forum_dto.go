@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/medflow/backend/internal/models"
 )
 
@@ -125,18 +126,26 @@ type Comment struct {
 	Content    string     `json:"content"`
 	Depth      int        `json:"depth"`
 	LikesCount int        `json:"likes_count"`
+	VoteScore  int        `json:"vote_score"`
+	MyVote     *string    `json:"my_vote,omitempty"`
 	HiddenAt   *time.Time `json:"hidden_at,omitempty"`
 	DeletedAt  *time.Time `json:"deleted_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-func ToComment(c *models.Comment) Comment {
+// ToComment - summaries может быть nil (напр. только что созданный/изменённый
+// комментарий заведомо без голосов): чтение из nil-карты в Go безопасно и
+// возвращает нулевой models.VoteSummary{}.
+func ToComment(c *models.Comment, summaries map[uuid.UUID]models.VoteSummary) Comment {
+	vs := summaries[c.ID]
 	return Comment{
 		ID:         c.ID.String(),
 		Author:     ToPublicUser(c.Author),
 		Content:    c.Content,
 		Depth:      c.Depth,
 		LikesCount: c.LikesCount,
+		VoteScore:  vs.Score,
+		MyVote:     vs.MyVote,
 		HiddenAt:   c.HiddenAt,
 		DeletedAt:  c.DeletedAt,
 		CreatedAt:  c.CreatedAt,
@@ -148,13 +157,13 @@ type CommentTree struct {
 	Replies []Comment `json:"replies"`
 }
 
-func ToCommentTree(c *models.Comment) CommentTree {
+func ToCommentTree(c *models.Comment, summaries map[uuid.UUID]models.VoteSummary) CommentTree {
 	replies := make([]Comment, len(c.Replies))
 	for i, reply := range c.Replies {
-		replies[i] = ToComment(&reply)
+		replies[i] = ToComment(&reply, summaries)
 	}
 	return CommentTree{
-		Comment: ToComment(c),
+		Comment: ToComment(c, summaries),
 		Replies: replies,
 	}
 }
@@ -166,6 +175,17 @@ type CreateCommentRequest struct {
 
 type UpdateCommentRequest struct {
 	Content string `json:"content" binding:"required,min=1,max=5000"`
+}
+
+// VoteRequest - голос за комментарий, отдельно от ReactionRequest (эмодзи) -
+// разные глаголы API (/vote vs /reactions), см. ForumService.VoteComment.
+type VoteRequest struct {
+	Direction string `json:"direction" binding:"required,oneof=up down"`
+}
+
+type VoteResult struct {
+	Score  int     `json:"score"`
+	MyVote *string `json:"my_vote,omitempty"`
 }
 
 type ReactionRequest struct {

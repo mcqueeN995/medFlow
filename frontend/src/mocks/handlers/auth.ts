@@ -1,6 +1,16 @@
 import { http, HttpResponse } from 'msw'
 import { University, UserRole } from '@/api/generated'
-import type { AuthResponse, LoginRequest, RegisterRequest, UpdateProfileRequest, UserProfile } from '@/api/generated'
+import type {
+  AuthResponse,
+  ConfirmLoginChangeRequest,
+  ConfirmPasswordResetRequest,
+  LoginRequest,
+  RegisterRequest,
+  RequestLoginChangeRequest,
+  RequestPasswordResetRequest,
+  UpdateProfileRequest,
+  UserProfile,
+} from '@/api/generated'
 
 const API = '*/api/v1'
 
@@ -13,6 +23,7 @@ const users: MockUser[] = [
   {
     id: '11111111-1111-1111-1111-111111111111',
     email: 'student@sechenov.ru',
+    login: 'anatomy_enjoyer',
     nickname: 'anatomy_enjoyer',
     role: UserRole.user,
     university: University.sechenov,
@@ -25,6 +36,7 @@ const users: MockUser[] = [
   {
     id: '22222222-2222-2222-2222-222222222222',
     email: 'admin@medflow.local',
+    login: 'admin',
     nickname: 'admin',
     role: UserRole.admin,
     email_verified_at: new Date().toISOString(),
@@ -32,6 +44,18 @@ const users: MockUser[] = [
     password: 'admin12345',
   },
 ]
+
+// Ожидающие подтверждения смены login (мок-аналог login_change_requests) -
+// код фиксированный, чтобы e2e/компонентные тесты могли его ввести без
+// перехвата письма.
+const MOCK_LOGIN_CHANGE_CODE = '123456'
+const pendingLoginChanges = new Map<string, string>() // userId -> new_login
+
+// Восстановление пароля - тот же мок-паттерн, что и MOCK_LOGIN_CHANGE_CODE:
+// фиксированный код, чтобы тесты могли ввести его без перехвата письма.
+// Только один активный запрос одновременно, как и в реальном backend.
+const MOCK_PASSWORD_RESET_CODE = '654321'
+let pendingPasswordResetUserId: string | null = null
 
 // Токен → id владельца. Реальный backend кладёт user_id в JWT-claims (см.
 // internal/pkg/jwt); здесь достаточно плоской карты, чтобы /users/me и
@@ -65,10 +89,12 @@ export type { MockUser }
 export const authHandlers = [
   http.post(`${API}/auth/login`, async ({ request }) => {
     const body = (await request.json()) as LoginRequest
-    const user = users.find((u) => u.email === body.email && u.password === body.password)
+    const user = users.find(
+      (u) => (u.email === body.login || u.login === body.login) && u.password === body.password,
+    )
     if (!user) {
       return HttpResponse.json(
-        { error: { code: 'invalid_credentials', message: 'Неверный email или пароль' } },
+        { error: { code: 'invalid_credentials', message: 'Неверный логин или пароль' } },
         { status: 401 },
       )
     }
@@ -83,9 +109,16 @@ export const authHandlers = [
         { status: 409 },
       )
     }
+    if (users.some((u) => u.login === body.login)) {
+      return HttpResponse.json(
+        { error: { code: 'LOGIN_EXISTS', message: 'Логин уже занят' } },
+        { status: 409 },
+      )
+    }
     const newUser: MockUser = {
       id: crypto.randomUUID(),
       email: body.email,
+      login: body.login,
       nickname: body.nickname,
       role: UserRole.user,
       university: body.university,
@@ -133,6 +166,79 @@ export const authHandlers = [
     const { password: _password, ...profile } = user
     void _password
     return HttpResponse.json(profile)
+  }),
+
+  http.post(`${API}/users/me/login-change`, async ({ request }) => {
+    const user = userByToken(request.headers.get('authorization'))
+    if (!user) return HttpResponse.json({ error: { code: 'unauthorized', message: 'Не авторизован' } }, { status: 401 })
+
+    const body = (await request.json()) as RequestLoginChangeRequest
+    if (body.current_password !== user.password) {
+      return HttpResponse.json(
+        { error: { code: 'INVALID_CREDENTIALS', message: 'Неверный пароль' } },
+        { status: 401 },
+      )
+    }
+    if (users.some((u) => u.id !== user.id && u.login === body.new_login)) {
+      return HttpResponse.json(
+        { error: { code: 'LOGIN_EXISTS', message: 'Логин уже занят' } },
+        { status: 409 },
+      )
+    }
+    pendingLoginChanges.set(user.id!, body.new_login)
+    return HttpResponse.json({ message: 'confirmation code sent' })
+  }),
+
+  http.post(`${API}/users/me/login-change/confirm`, async ({ request }) => {
+    const user = userByToken(request.headers.get('authorization'))
+    if (!user) return HttpResponse.json({ error: { code: 'unauthorized', message: 'Не авторизован' } }, { status: 401 })
+
+    const body = (await request.json()) as ConfirmLoginChangeRequest
+    const newLogin = pendingLoginChanges.get(user.id!)
+    if (body.code !== MOCK_LOGIN_CHANGE_CODE || !newLogin) {
+      return HttpResponse.json(
+        { error: { code: 'INVALID_CODE', message: 'Неверный или истёкший код' } },
+        { status: 400 },
+      )
+    }
+    user.login = newLogin
+    pendingLoginChanges.delete(user.id!)
+    const { password: _password, ...profile } = user
+    void _password
+    return HttpResponse.json(profile)
+  }),
+
+  http.post(`${API}/auth/password-reset`, async ({ request }) => {
+    const body = (await request.json()) as RequestPasswordResetRequest
+    const user = users.find((u) => u.email === body.login || u.login === body.login)
+    // Всегда 200, даже если аккаунт не найден - не палим существование (см. AuthService.RequestPasswordReset).
+    if (user) {
+      pendingPasswordResetUserId = user.id!
+    }
+    return HttpResponse.json({ message: 'if the account exists, a reset code has been sent' })
+  }),
+
+  http.post(`${API}/auth/password-reset/confirm`, async ({ request }) => {
+    const body = (await request.json()) as ConfirmPasswordResetRequest
+    if (body.code !== MOCK_PASSWORD_RESET_CODE || !pendingPasswordResetUserId) {
+      return HttpResponse.json(
+        { error: { code: 'INVALID_CODE', message: 'Неверный или истёкший код' } },
+        { status: 400 },
+      )
+    }
+    const user = users.find((u) => u.id === pendingPasswordResetUserId)
+    if (!user) {
+      return HttpResponse.json(
+        { error: { code: 'INVALID_CODE', message: 'Неверный или истёкший код' } },
+        { status: 400 },
+      )
+    }
+    user.password = body.new_password
+    pendingPasswordResetUserId = null
+    for (const [token, ownerId] of tokenOwners) {
+      if (ownerId === user.id) tokenOwners.delete(token)
+    }
+    return new HttpResponse(null, { status: 204 })
   }),
 
   http.delete(`${API}/users/me`, ({ request }) => {

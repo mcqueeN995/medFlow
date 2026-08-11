@@ -36,15 +36,19 @@ const (
 )
 
 var (
-	ErrCardTaskNotFound   = errors.New("card task not found")
-	ErrCardNotFound       = errors.New("card not found")
-	ErrTooManyActiveTasks = errors.New("too many active card tasks")
+	ErrCardTaskNotFound     = errors.New("card task not found")
+	ErrCardNotFound         = errors.New("card not found")
+	ErrTooManyActiveTasks   = errors.New("too many active card tasks")
+	ErrCardFavoriteNotFound = errors.New("card favorite not found")
+	ErrCardRatingNotFound   = errors.New("card rating not found")
 )
 
 type CardService struct {
 	taskRepo     CardTaskRepository
 	cardRepo     CardRepository
 	progressRepo CardProgressRepository
+	favoriteRepo CardFavoriteRepository
+	ratingRepo   CardRatingRepository
 	chunkRepo    TextbookChunkRepository
 	textbookRepo TextbookRepository
 	uploadRepo   UploadRepository
@@ -66,6 +70,8 @@ func NewCardService(
 	taskRepo CardTaskRepository,
 	cardRepo CardRepository,
 	progressRepo CardProgressRepository,
+	favoriteRepo CardFavoriteRepository,
+	ratingRepo CardRatingRepository,
 	chunkRepo TextbookChunkRepository,
 	textbookRepo TextbookRepository,
 	uploadRepo UploadRepository,
@@ -77,7 +83,8 @@ func NewCardService(
 	pushNotifier PushNotifier,
 ) *CardService {
 	return &CardService{
-		taskRepo: taskRepo, cardRepo: cardRepo, progressRepo: progressRepo, chunkRepo: chunkRepo,
+		taskRepo: taskRepo, cardRepo: cardRepo, progressRepo: progressRepo,
+		favoriteRepo: favoriteRepo, ratingRepo: ratingRepo, chunkRepo: chunkRepo,
 		textbookRepo: textbookRepo, uploadRepo: uploadRepo, reportRepo: reportRepo,
 		storage: storage, llm: llmProvider, embed: embedProvider, enqueuer: enqueuer, pushNotifier: pushNotifier,
 	}
@@ -235,8 +242,8 @@ func (s *CardService) GetTask(ctx context.Context, userID, taskID uuid.UUID) (*d
 	if err != nil {
 		return nil, s.mapTaskErr(err)
 	}
-	if task.UserID != userID {
-		return nil, ErrForbidden
+	if err := s.authorizeTaskAccess(task, userID); err != nil {
+		return nil, err
 	}
 	s.enrichQueueInfo(ctx, task)
 	out := dto.ToCardTask(task)
@@ -248,8 +255,8 @@ func (s *CardService) ListTaskCards(ctx context.Context, userID, taskID uuid.UUI
 	if err != nil {
 		return nil, nil, s.mapTaskErr(err)
 	}
-	if task.UserID != userID {
-		return nil, nil, ErrForbidden
+	if err := s.authorizeTaskAccess(task, userID); err != nil {
+		return nil, nil, err
 	}
 	if page < 1 {
 		page = 1
@@ -262,12 +269,88 @@ func (s *CardService) ListTaskCards(ctx context.Context, userID, taskID uuid.UUI
 	if err != nil {
 		return nil, nil, err
 	}
-	items := make([]dto.Card, len(cards))
-	for i := range cards {
-		items[i] = dto.ToCard(&cards[i])
+	items, err := s.enrichCards(ctx, userID, cards)
+	if err != nil {
+		return nil, nil, err
 	}
 	pagination := dto.NewPagination(page, limit, total)
 	return &pagination, items, nil
+}
+
+// authorizeTaskAccess - catalog_textbook-задачи (и их карточки) открыты
+// любому авторизованному пользователю, т.к. переиспользуются между всеми
+// (см. cache_key/CloneForTask); user_upload остаётся приватной, только
+// автору - исходный PDF всё равно удаляется после обработки, делиться
+// содержимым можно только явным шерингом (см. ShareTask).
+func (s *CardService) authorizeTaskAccess(task *models.CardTask, userID uuid.UUID) error {
+	if task.SourceType == models.SourceUserUpload && task.UserID != userID {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// authorizeCardAccess - то же правило, что и authorizeTaskAccess, но для
+// эндпоинтов избранного/рейтинга, которые получают cardID напрямую (не
+// taskID) - избранное/рейтинг catalog_textbook-карточки доступны любому,
+// user_upload - только автору задачи.
+func (s *CardService) authorizeCardAccess(ctx context.Context, userID, cardID uuid.UUID) (*models.Card, error) {
+	card, err := s.cardRepo.FindByID(ctx, cardID)
+	if err != nil {
+		if errors.Is(err, models.ErrCardNotFound) {
+			return nil, ErrCardNotFound
+		}
+		return nil, err
+	}
+	task, err := s.taskRepo.FindByID(ctx, card.TaskID)
+	if err != nil {
+		return nil, s.mapTaskErr(err)
+	}
+	if err := s.authorizeTaskAccess(task, userID); err != nil {
+		return nil, err
+	}
+	return card, nil
+}
+
+// enrichCards - батч-обогащение списка карточек избранным/рейтингом одного
+// viewerID, три запроса вместо 3*N (см. IsFavoritedBatch/AggregateForCardsBatch/
+// MyRatingsBatch) - тот же принцип, что и VoteSummaries в форуме.
+func (s *CardService) enrichCards(ctx context.Context, userID uuid.UUID, cards []models.Card) ([]dto.Card, error) {
+	cardIDs := make([]uuid.UUID, len(cards))
+	for i := range cards {
+		cardIDs[i] = cards[i].ID
+	}
+
+	favorites, err := s.favoriteRepo.IsFavoritedBatch(ctx, userID, cardIDs)
+	if err != nil {
+		return nil, err
+	}
+	ratings, err := s.ratingRepo.AggregateForCardsBatch(ctx, cardIDs)
+	if err != nil {
+		return nil, err
+	}
+	myRatings, err := s.ratingRepo.MyRatingsBatch(ctx, userID, cardIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]dto.Card, len(cards))
+	for i := range cards {
+		item := dto.ToCard(&cards[i])
+		if favorites[cards[i].ID] {
+			v := true
+			item.IsFavorite = &v
+		}
+		if agg, ok := ratings[cards[i].ID]; ok {
+			avg, cnt := agg.AverageStars, agg.RatingsCount
+			item.AverageStars = &avg
+			item.RatingsCount = &cnt
+		}
+		if my, ok := myRatings[cards[i].ID]; ok {
+			item.MyStars = &my
+		}
+		items[i] = item
+	}
+	return items, nil
 }
 
 func (s *CardService) Review(ctx context.Context, userID uuid.UUID, limit int) ([]dto.ReviewCard, int, error) {
@@ -347,6 +430,200 @@ func (s *CardService) Stats(ctx context.Context, userID uuid.UUID) (*dto.CardsSt
 	stats.StreakDays = computeStreak(days, time.Now())
 	out := dto.ToCardsStats(stats)
 	return &out, nil
+}
+
+// ==================== Лента каталога ====================
+
+func (s *CardService) ListCatalogFeed(ctx context.Context, q, textbookID *string, difficulty *models.CardDifficulty, page, limit int) (*dto.Pagination, []dto.CardCatalogEntry, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+
+	filter := models.CardCatalogFeedFilter{Q: q, Difficulty: difficulty, Page: page, Limit: limit}
+	if textbookID != nil {
+		id, err := uuid.Parse(*textbookID)
+		if err != nil {
+			return nil, nil, ErrTextbookNotFound
+		}
+		filter.TextbookID = &id
+	}
+
+	entries, total, err := s.taskRepo.ListCatalogFeed(ctx, filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	items := make([]dto.CardCatalogEntry, len(entries))
+	for i := range entries {
+		items[i] = dto.ToCardCatalogEntry(&entries[i])
+	}
+	pagination := dto.NewPagination(page, limit, total)
+	return &pagination, items, nil
+}
+
+// ==================== Избранное ====================
+
+func (s *CardService) FavoriteCard(ctx context.Context, userID, cardID uuid.UUID) error {
+	if _, err := s.authorizeCardAccess(ctx, userID, cardID); err != nil {
+		return err
+	}
+	return s.favoriteRepo.Add(ctx, userID, cardID)
+}
+
+func (s *CardService) UnfavoriteCard(ctx context.Context, userID, cardID uuid.UUID) error {
+	if err := s.favoriteRepo.Remove(ctx, userID, cardID); err != nil {
+		if errors.Is(err, models.ErrCardFavoriteNotFound) {
+			return ErrCardFavoriteNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *CardService) ListFavorites(ctx context.Context, userID uuid.UUID, page, limit int) (*dto.Pagination, []dto.Card, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	cards, total, err := s.favoriteRepo.ListForUser(ctx, userID, page, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	items, err := s.enrichCards(ctx, userID, cards)
+	if err != nil {
+		return nil, nil, err
+	}
+	pagination := dto.NewPagination(page, limit, total)
+	return &pagination, items, nil
+}
+
+// ReviewFavorites - тот же батч-повтор SM-2, что и Review, но ограничен
+// избранными карточками - отдельная колода поверх общего due-списка.
+func (s *CardService) ReviewFavorites(ctx context.Context, userID uuid.UUID, limit int) ([]dto.ReviewCard, int, error) {
+	if limit < 1 || limit > 50 {
+		limit = 20
+	}
+	due, err := s.progressRepo.ListDueFavoritesForUser(ctx, userID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.progressRepo.CountDueFavoritesForUser(ctx, userID)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]dto.ReviewCard, len(due))
+	for i := range due {
+		items[i] = dto.ToReviewCard(&due[i])
+	}
+	return items, total, nil
+}
+
+// ==================== Рейтинг звёзд ====================
+
+func (s *CardService) RateCardStars(ctx context.Context, userID, cardID uuid.UUID, stars int) error {
+	if _, err := s.authorizeCardAccess(ctx, userID, cardID); err != nil {
+		return err
+	}
+	return s.ratingRepo.Upsert(ctx, userID, cardID, stars)
+}
+
+func (s *CardService) RemoveCardRating(ctx context.Context, userID, cardID uuid.UUID) error {
+	if err := s.ratingRepo.Delete(ctx, userID, cardID); err != nil {
+		if errors.Is(err, models.ErrCardRatingNotFound) {
+			return ErrCardRatingNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *CardService) ListRatedCards(ctx context.Context, userID uuid.UUID, page, limit int) (*dto.Pagination, []dto.Card, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	cards, total, err := s.ratingRepo.ListRatedByUser(ctx, userID, page, limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	items, err := s.enrichCards(ctx, userID, cards)
+	if err != nil {
+		return nil, nil, err
+	}
+	pagination := dto.NewPagination(page, limit, total)
+	return &pagination, items, nil
+}
+
+// ==================== Шеринг ====================
+
+// ShareTask - идемпотентно: повторный вызов на уже расшаренной задаче
+// возвращает тот же токен, а не генерирует новый (иначе старые
+// разошедшиеся ссылки молча ломались бы). Доступно только владельцу задачи,
+// независимо от source_type - в отличие от избранного/рейтинга, шеринг
+// личных user_upload-наборов тоже разрешён (это единственный способ ими
+// поделиться, раз они не попадают в общую ленту каталога).
+func (s *CardService) ShareTask(ctx context.Context, userID, taskID uuid.UUID) (*dto.ShareTaskResponse, error) {
+	task, err := s.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		return nil, s.mapTaskErr(err)
+	}
+	if task.UserID != userID {
+		return nil, ErrForbidden
+	}
+	if task.ShareToken != nil {
+		return &dto.ShareTaskResponse{ShareToken: *task.ShareToken}, nil
+	}
+
+	token, err := GenerateRandomToken(32)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.taskRepo.SetShareToken(ctx, taskID, token); err != nil {
+		return nil, err
+	}
+	return &dto.ShareTaskResponse{ShareToken: token}, nil
+}
+
+func (s *CardService) UnshareTask(ctx context.Context, userID, taskID uuid.UUID) error {
+	task, err := s.taskRepo.FindByID(ctx, taskID)
+	if err != nil {
+		return s.mapTaskErr(err)
+	}
+	if task.UserID != userID {
+		return ErrForbidden
+	}
+	return s.taskRepo.ClearShareToken(ctx, taskID)
+}
+
+// GetSharedTask - публичный, без авторизации (см. router.go: вне группы
+// cards.Use(AuthRequired)). Отдаёт только задачи в статусе done - угаданный
+// или протухший (сгенерённый заново после Unshare/повторного Share) токен
+// не должен раскрывать промежуточное состояние pending/processing/failed.
+func (s *CardService) GetSharedTask(ctx context.Context, token string) (*dto.SharedCardTask, error) {
+	task, err := s.taskRepo.FindByShareToken(ctx, token)
+	if err != nil {
+		return nil, s.mapTaskErr(err)
+	}
+	if task.Status != models.CardTaskDone {
+		return nil, ErrCardTaskNotFound
+	}
+
+	cards, _, err := s.cardRepo.ListByTask(ctx, task.ID, 1, 500)
+	if err != nil {
+		return nil, err
+	}
+	cardDTOs := make([]dto.Card, len(cards))
+	for i := range cards {
+		cardDTOs[i] = dto.ToCard(&cards[i])
+	}
+	out := &dto.SharedCardTask{Topic: task.Topic, Difficulty: task.Difficulty, Cards: cardDTOs}
+	return out, nil
 }
 
 // enrichQueueInfo вычисляет position_in_queue/estimated_wait_seconds на

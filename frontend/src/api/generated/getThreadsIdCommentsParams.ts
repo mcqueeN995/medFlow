@@ -15,8 +15,13 @@
  *
  * OpenAPI spec version: 1.0.0
  */
+import type { GetThreadsIdCommentsSort } from './getThreadsIdCommentsSort';
 
 export type GetThreadsIdCommentsParams = {
 page?: number;
 limit?: number;
+/**
+ * new - по времени (по умолчанию), best - по сумме голосов up/down
+ */
+sort?: GetThreadsIdCommentsSort;
 };

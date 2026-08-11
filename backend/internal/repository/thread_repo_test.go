@@ -57,18 +57,65 @@ func TestThreadRepo_FindByID_NotFound(t *testing.T) {
 	}
 }
 
-func TestThreadRepo_IncrementViews(t *testing.T) {
+func TestThreadRepo_IncrementViewsIfNotRecentlyViewed_FirstViewCounted(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := NewThreadRepo(pool)
 	ctx := context.Background()
 	author := createTestForumUser(t, pool)
+	viewer := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, repo, author.ID, "views test", nil)
 
-	if err := repo.IncrementViews(ctx, thread.ID); err != nil {
-		t.Fatalf("IncrementViews() error = %v", err)
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() error = %v", err)
 	}
-	if err := repo.IncrementViews(ctx, thread.ID); err != nil {
-		t.Fatalf("IncrementViews() error = %v", err)
+
+	found, err := repo.FindByID(ctx, thread.ID)
+	if err != nil {
+		t.Fatalf("FindByID() error = %v", err)
+	}
+	if found.ViewsCount != 1 {
+		t.Errorf("ViewsCount = %d, want 1", found.ViewsCount)
+	}
+}
+
+func TestThreadRepo_IncrementViewsIfNotRecentlyViewed_SameUserRepeatWithin24h_NotCountedTwice(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	viewer := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, repo, author.ID, "views test", nil)
+
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [1st] error = %v", err)
+	}
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [2nd] error = %v", err)
+	}
+
+	found, err := repo.FindByID(ctx, thread.ID)
+	if err != nil {
+		t.Fatalf("FindByID() error = %v", err)
+	}
+	if found.ViewsCount != 1 {
+		t.Errorf("ViewsCount = %d, want 1 (повторный просмотр в пределах 24ч не должен накручивать счётчик)", found.ViewsCount)
+	}
+}
+
+func TestThreadRepo_IncrementViewsIfNotRecentlyViewed_DifferentUsers_BothCounted(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	viewer1 := createTestForumUser(t, pool)
+	viewer2 := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, repo, author.ID, "views test", nil)
+
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer1.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [viewer1] error = %v", err)
+	}
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer2.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [viewer2] error = %v", err)
 	}
 
 	found, err := repo.FindByID(ctx, thread.ID)
@@ -76,7 +123,50 @@ func TestThreadRepo_IncrementViews(t *testing.T) {
 		t.Fatalf("FindByID() error = %v", err)
 	}
 	if found.ViewsCount != 2 {
-		t.Errorf("ViewsCount = %d, want 2", found.ViewsCount)
+		t.Errorf("ViewsCount = %d, want 2 (разные пользователи считаются независимо)", found.ViewsCount)
+	}
+}
+
+func TestThreadRepo_IncrementViewsIfNotRecentlyViewed_After24h_CountedAgain(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	viewer := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, repo, author.ID, "views test", nil)
+
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [1st] error = %v", err)
+	}
+
+	// Имитируем "просмотр 25 часов назад" напрямую в БД - без этого пришлось
+	// бы реально ждать 24 часа, чтобы проверить дедуп-окно.
+	if _, err := pool.Exec(ctx, `UPDATE thread_views SET last_viewed_at = now() - interval '25 hours' WHERE user_id = $1 AND thread_id = $2`, viewer.ID, thread.ID); err != nil {
+		t.Fatalf("backdate thread_views error = %v", err)
+	}
+
+	if err := repo.IncrementViewsIfNotRecentlyViewed(ctx, thread.ID, viewer.ID); err != nil {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() [2nd, after 24h] error = %v", err)
+	}
+
+	found, err := repo.FindByID(ctx, thread.ID)
+	if err != nil {
+		t.Fatalf("FindByID() error = %v", err)
+	}
+	if found.ViewsCount != 2 {
+		t.Errorf("ViewsCount = %d, want 2 (просмотр спустя >24ч засчитывается снова)", found.ViewsCount)
+	}
+}
+
+func TestThreadRepo_IncrementViewsIfNotRecentlyViewed_ThreadNotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	viewer := createTestForumUser(t, pool)
+
+	err := repo.IncrementViewsIfNotRecentlyViewed(ctx, uuid.New(), viewer.ID)
+	if err != models.ErrThreadNotFound {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() error = %v, want ErrThreadNotFound", err)
 	}
 }
 

@@ -25,6 +25,10 @@ type CardTaskRepository interface {
 	FindDoneByCacheKey(ctx context.Context, cacheKey string) (*models.CardTask, error)
 	CountActive(ctx context.Context, userID uuid.UUID) (int, error)
 	CountPendingBefore(ctx context.Context, createdAt time.Time) (int, error)
+	ListCatalogFeed(ctx context.Context, f models.CardCatalogFeedFilter) ([]models.CardCatalogEntry, int, error)
+	SetShareToken(ctx context.Context, taskID uuid.UUID, token string) error
+	ClearShareToken(ctx context.Context, taskID uuid.UUID) error
+	FindByShareToken(ctx context.Context, token string) (*models.CardTask, error)
 }
 
 type CardRepository interface {
@@ -49,6 +53,27 @@ type CardProgressRepository interface {
 	// DistinctReviewDaysForUser - календарные даты (desc) последних
 	// повторений пользователя, для расчёта streak_days.
 	DistinctReviewDaysForUser(ctx context.Context, userID uuid.UUID, limit int) ([]time.Time, error)
+	ListDueFavoritesForUser(ctx context.Context, userID uuid.UUID, limit int) ([]models.ReviewCard, error)
+	CountDueFavoritesForUser(ctx context.Context, userID uuid.UUID) (int, error)
+}
+
+// CardFavoriteRepository - избранное карточек, независимо от SM-2 прогресса
+// (CardProgressRepository). Доступ гейтится в CardService.authorizeCardAccess.
+type CardFavoriteRepository interface {
+	Add(ctx context.Context, userID, cardID uuid.UUID) error
+	Remove(ctx context.Context, userID, cardID uuid.UUID) error
+	ListForUser(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error)
+	IsFavoritedBatch(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]bool, error)
+}
+
+// CardRatingRepository - оценки карточек звёздами 1-5, отдельно от
+// избранного и от форумных reactions.
+type CardRatingRepository interface {
+	Upsert(ctx context.Context, userID, cardID uuid.UUID, stars int) error
+	Delete(ctx context.Context, userID, cardID uuid.UUID) error
+	AggregateForCardsBatch(ctx context.Context, cardIDs []uuid.UUID) (map[uuid.UUID]models.CardRatingAggregate, error)
+	MyRatingsBatch(ctx context.Context, userID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]int, error)
+	ListRatedByUser(ctx context.Context, userID uuid.UUID, page, limit int) ([]models.Card, int, error)
 }
 
 type TextbookChunkRepository interface {
@@ -68,9 +93,12 @@ type TaskEnqueuer interface {
 type UserRepository interface {
 	Create(ctx context.Context, user *models.User) error
 	FindByEmail(ctx context.Context, email string) (*models.User, error)
+	FindByLogin(ctx context.Context, login string) (*models.User, error)
 	FindByNickname(ctx context.Context, nickname string) (*models.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	Update(ctx context.Context, id uuid.UUID, nickname string, university *models.University, course *int, faculty *string) (*models.User, error)
+	UpdateLogin(ctx context.Context, id uuid.UUID, login string) (*models.User, error)
+	UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error
 	SoftDelete(ctx context.Context, id uuid.UUID) error
 	FindPublicByID(ctx context.Context, id uuid.UUID) (*models.PublicUser, error)
 	AdminList(ctx context.Context, f models.AdminUserListFilter) ([]models.User, int, error)
@@ -87,10 +115,24 @@ type TokenRepository interface {
 	DeleteExpired(ctx context.Context) (int64, error)
 }
 
+type LoginChangeRepository interface {
+	Save(ctx context.Context, req *models.LoginChangeRequest) error
+	FindByCodeHash(ctx context.Context, codeHash string) (*models.LoginChangeRequest, error)
+	DeleteByID(ctx context.Context, id uuid.UUID) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
+}
+
+type PasswordResetRepository interface {
+	Save(ctx context.Context, req *models.PasswordResetRequest) error
+	FindByCodeHash(ctx context.Context, codeHash string) (*models.PasswordResetRequest, error)
+	DeleteByID(ctx context.Context, id uuid.UUID) error
+	DeleteByUserID(ctx context.Context, userID uuid.UUID) error
+}
+
 type ThreadRepository interface {
 	Create(ctx context.Context, authorID uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Thread, error)
-	IncrementViews(ctx context.Context, id uuid.UUID) error
+	IncrementViewsIfNotRecentlyViewed(ctx context.Context, threadID, userID uuid.UUID) error
 	Update(ctx context.Context, id uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error)
 	SoftDelete(ctx context.Context, id uuid.UUID) error
 	List(ctx context.Context, f models.ThreadListFilter) ([]models.Thread, int, error)
@@ -102,13 +144,16 @@ type CommentRepository interface {
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Comment, error)
 	Update(ctx context.Context, id uuid.UUID, content string) (*models.Comment, error)
 	SoftDelete(ctx context.Context, id, threadID uuid.UUID) error
-	ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int) ([]models.Comment, int, error)
+	ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error)
 	Hide(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error)
 }
 
 type ReactionRepository interface {
 	Upsert(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, emoji string) (*models.Reaction, error)
 	Delete(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error
+	UpsertVote(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, direction string) (*models.Reaction, error)
+	DeleteVote(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error
+	VoteSummaries(ctx context.Context, targetType models.ReactionTargetType, targetIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID]models.VoteSummary, error)
 }
 
 type ReportRepository interface {
@@ -185,4 +230,10 @@ type PushSender interface {
 // как узкая зависимость вместо полного PushService.
 type PushNotifier interface {
 	Notify(ctx context.Context, userID uuid.UUID, kind models.NotificationKind, title, message string) error
+}
+
+// EmailSender - узкая абстракция над pkg/email.Sender, нужна только чтобы
+// UserService можно было тестировать без реального SMTP (см. RequestLoginChange).
+type EmailSender interface {
+	Send(to, subject, body string) error
 }

@@ -25,7 +25,7 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     renderLoginPage()
 
-    await user.type(screen.getByPlaceholderText('Логин/почта'), 'student@sechenov.ru')
+    await user.type(screen.getByPlaceholderText('Логин или почта'), 'student@sechenov.ru')
     await user.type(screen.getByPlaceholderText('Пароль'), 'password123')
     await user.click(screen.getByRole('button', { name: 'Войти' }))
 
@@ -37,7 +37,7 @@ describe('LoginPage', () => {
     const user = userEvent.setup()
     renderLoginPage()
 
-    await user.type(screen.getByPlaceholderText('Логин/почта'), 'student@sechenov.ru')
+    await user.type(screen.getByPlaceholderText('Логин или почта'), 'student@sechenov.ru')
     await user.type(screen.getByPlaceholderText('Пароль'), 'password123')
     await user.click(screen.getByRole('checkbox'))
     await user.click(screen.getByRole('button', { name: 'Войти' }))
@@ -47,11 +47,24 @@ describe('LoginPage', () => {
     expect(useAuthStore.getState().user?.email).toBe('student@sechenov.ru')
   })
 
+  it('logs in with a login instead of email', async () => {
+    const user = userEvent.setup()
+    renderLoginPage()
+
+    await user.type(screen.getByPlaceholderText('Логин или почта'), 'anatomy_enjoyer')
+    await user.type(screen.getByPlaceholderText('Пароль'), 'password123')
+    await user.click(screen.getByRole('checkbox'))
+    await user.click(screen.getByRole('button', { name: 'Войти' }))
+
+    await waitFor(() => expect(screen.getByText(/Библиотека/)).toBeInTheDocument())
+    expect(useAuthStore.getState().user?.login).toBe('anatomy_enjoyer')
+  })
+
   it('shows an error toast-friendly message on wrong credentials', async () => {
     const user = userEvent.setup()
     renderLoginPage()
 
-    await user.type(screen.getByPlaceholderText('Логин/почта'), 'student@sechenov.ru')
+    await user.type(screen.getByPlaceholderText('Логин или почта'), 'student@sechenov.ru')
     await user.type(screen.getByPlaceholderText('Пароль'), 'wrong-password')
     await user.click(screen.getByRole('checkbox'))
     await user.click(screen.getByRole('button', { name: 'Войти' }))

@@ -129,7 +129,7 @@ func TestCommentRepo_ListByThread_TopLevelWithReplies(t *testing.T) {
 	}
 	cleanupComment(t, pool, reply.ID)
 
-	comments, total, err := commentRepo.ListByThread(ctx, thread.ID, 1, 50)
+	comments, total, err := commentRepo.ListByThread(ctx, thread.ID, 1, 50, "new")
 	if err != nil {
 		t.Fatalf("ListByThread() error = %v", err)
 	}
@@ -149,6 +149,59 @@ func TestCommentRepo_ListByThread_TopLevelWithReplies(t *testing.T) {
 	}
 	if len(byID[top2.ID]) != 0 {
 		t.Errorf("top2 replies = %d, want 0", len(byID[top2.ID]))
+	}
+}
+
+func TestCommentRepo_ListByThread_SortBest_OrdersByVoteScore(t *testing.T) {
+	pool := setupTestDB(t)
+	threadRepo := NewThreadRepo(pool)
+	commentRepo := NewCommentRepo(pool)
+	reactionRepo := NewReactionRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	voter1 := createTestForumUser(t, pool)
+	voter2 := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
+
+	low, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "low score, posted first")
+	if err != nil {
+		t.Fatalf("Create() [low] error = %v", err)
+	}
+	cleanupComment(t, pool, low.ID)
+
+	high, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "high score, posted second")
+	if err != nil {
+		t.Fatalf("Create() [high] error = %v", err)
+	}
+	cleanupComment(t, pool, high.ID)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM reactions WHERE target_id IN ($1, $2)", low.ID, high.ID)
+	})
+
+	if _, err := reactionRepo.UpsertVote(ctx, voter1.ID, models.ReactionTargetComment, high.ID, "up"); err != nil {
+		t.Fatalf("UpsertVote() error = %v", err)
+	}
+	if _, err := reactionRepo.UpsertVote(ctx, voter2.ID, models.ReactionTargetComment, high.ID, "up"); err != nil {
+		t.Fatalf("UpsertVote() error = %v", err)
+	}
+	if _, err := reactionRepo.UpsertVote(ctx, voter1.ID, models.ReactionTargetComment, low.ID, "down"); err != nil {
+		t.Fatalf("UpsertVote() error = %v", err)
+	}
+
+	comments, _, err := commentRepo.ListByThread(ctx, thread.ID, 1, 50, "best")
+	if err != nil {
+		t.Fatalf("ListByThread() error = %v", err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("len(comments) = %d, want 2", len(comments))
+	}
+	// "high" опубликован позже "low", но с сортировкой sort=best должен идти
+	// первым - score важнее created_at.
+	if comments[0].ID != high.ID {
+		t.Errorf("comments[0].ID = %v, want high.ID=%v (сортировка по score, не по времени)", comments[0].ID, high.ID)
+	}
+	if comments[1].ID != low.ID {
+		t.Errorf("comments[1].ID = %v, want low.ID=%v", comments[1].ID, low.ID)
 	}
 }
 

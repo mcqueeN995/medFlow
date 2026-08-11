@@ -23,6 +23,8 @@ import type {
   CardTask,
   CardsStats,
   Comment,
+  ConfirmLoginChangeRequest,
+  ConfirmPasswordResetRequest,
   CreateCardTaskRequest,
   CreateCommentRequest,
   CreatePOIRequest,
@@ -45,6 +47,14 @@ import type {
   GetAdminUsersParams,
   GetAuthVerifyEmail200,
   GetAuthVerifyEmailParams,
+  GetCardsCatalog200,
+  GetCardsCatalogParams,
+  GetCardsFavorites200,
+  GetCardsFavoritesParams,
+  GetCardsFavoritesReview200,
+  GetCardsFavoritesReviewParams,
+  GetCardsRated200,
+  GetCardsRatedParams,
   GetCardsReview200,
   GetCardsReviewParams,
   GetCardsTasks200,
@@ -74,10 +84,7 @@ import type {
   PostAdminCommentsIdHideBody,
   PostAdminThreadsIdHideBody,
   PostAdminUsersIdBanBody,
-  PostAuthForgotPassword200,
-  PostAuthForgotPasswordBody,
-  PostAuthResetPassword200,
-  PostAuthResetPasswordBody,
+  PostAuthPasswordReset200,
   PostCardsIdRateBody,
   PostCardsIdReportBody,
   PostCommentsIdReactionsBody,
@@ -87,13 +94,19 @@ import type {
   PostThreadsIdReportBody,
   PostUploadBody,
   PostUploadParams,
+  PostUsersMeLoginChange200,
   PublicUser,
   PushPreferences,
   PushSubscriptionRequest,
+  RateCardStarsRequest,
   Reaction,
   RefreshRequest,
   RegisterRequest,
   Report,
+  RequestLoginChangeRequest,
+  RequestPasswordResetRequest,
+  ShareTaskResponse,
+  SharedCardTask,
   Subscription,
   Textbook,
   Thread,
@@ -103,7 +116,9 @@ import type {
   UpdateTextbookRequest,
   UpdateThreadRequest,
   UploadResponse,
-  UserProfile
+  UserProfile,
+  VoteRequest,
+  VoteResult
 } from './.';
 
 import { customInstance } from '../axios-instance';
@@ -167,29 +182,29 @@ export const postAuthLogout = (
     }
 
 /**
- * @summary Запрос ссылки для сброса пароля
+ * @summary Запрос кода восстановления пароля (email или логин) - не раскрывает существование аккаунта
  */
-export const postAuthForgotPassword = (
-    postAuthForgotPasswordBody: PostAuthForgotPasswordBody,
+export const postAuthPasswordReset = (
+    requestPasswordResetRequest: RequestPasswordResetRequest,
  ) => {
-      return customInstance<PostAuthForgotPassword200>(
-      {url: `/auth/forgot-password`, method: 'POST',
+      return customInstance<PostAuthPasswordReset200>(
+      {url: `/auth/password-reset`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: postAuthForgotPasswordBody
+      data: requestPasswordResetRequest
     },
       );
     }
 
 /**
- * @summary Сброс пароля по токену из email
+ * @summary Подтверждение восстановления пароля кодом из письма + новый пароль
  */
-export const postAuthResetPassword = (
-    postAuthResetPasswordBody: PostAuthResetPasswordBody,
+export const postAuthPasswordResetConfirm = (
+    confirmPasswordResetRequest: ConfirmPasswordResetRequest,
  ) => {
-      return customInstance<PostAuthResetPassword200>(
-      {url: `/auth/reset-password`, method: 'POST',
+      return customInstance<void>(
+      {url: `/auth/password-reset/confirm`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
-      data: postAuthResetPasswordBody
+      data: confirmPasswordResetRequest
     },
       );
     }
@@ -242,6 +257,34 @@ export const deleteUsersMe = (
       return customInstance<void>(
       {url: `/users/me`, method: 'DELETE',
         params
+    },
+      );
+    }
+
+/**
+ * @summary Запрос смены логина - проверяет пароль, шлёт код на текущий email
+ */
+export const postUsersMeLoginChange = (
+    requestLoginChangeRequest: RequestLoginChangeRequest,
+ ) => {
+      return customInstance<PostUsersMeLoginChange200>(
+      {url: `/users/me/login-change`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: requestLoginChangeRequest
+    },
+      );
+    }
+
+/**
+ * @summary Подтверждение смены логина кодом из письма
+ */
+export const postUsersMeLoginChangeConfirm = (
+    confirmLoginChangeRequest: ConfirmLoginChangeRequest,
+ ) => {
+      return customInstance<UserProfile>(
+      {url: `/users/me/login-change/confirm`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: confirmLoginChangeRequest
     },
       );
     }
@@ -367,6 +410,55 @@ export const getCardsTasksId = (
     }
 
 /**
+ * @summary Включить публичную ссылку на набор карточек задачи (владелец; идемпотентно)
+ */
+export const postCardsTasksIdShare = (
+    id: string,
+ ) => {
+      return customInstance<ShareTaskResponse>(
+      {url: `/cards/tasks/${id}/share`, method: 'POST'
+    },
+      );
+    }
+
+/**
+ * @summary Выключить публичную ссылку (владелец)
+ */
+export const deleteCardsTasksIdShare = (
+    id: string,
+ ) => {
+      return customInstance<void>(
+      {url: `/cards/tasks/${id}/share`, method: 'DELETE'
+    },
+      );
+    }
+
+/**
+ * @summary Публичный просмотр расшаренного набора карточек по токену
+ */
+export const getCardsSharedToken = (
+    token: string,
+ ) => {
+      return customInstance<SharedCardTask>(
+      {url: `/cards/shared/${token}`, method: 'GET'
+    },
+      );
+    }
+
+/**
+ * @summary Лента уже сгенерированных наборов из каталога учебников (один на cache_key)
+ */
+export const getCardsCatalog = (
+    params?: GetCardsCatalogParams,
+ ) => {
+      return customInstance<GetCardsCatalog200>(
+      {url: `/cards/catalog`, method: 'GET',
+        params
+    },
+      );
+    }
+
+/**
  * @summary Карточки, сгенерированные задачей
  */
 export const getCardsTasksIdCards = (
@@ -389,6 +481,96 @@ export const getCardsReview = (
       return customInstance<GetCardsReview200>(
       {url: `/cards/review`, method: 'GET',
         params
+    },
+      );
+    }
+
+/**
+ * @summary Избранные карточки текущего пользователя
+ */
+export const getCardsFavorites = (
+    params?: GetCardsFavoritesParams,
+ ) => {
+      return customInstance<GetCardsFavorites200>(
+      {url: `/cards/favorites`, method: 'GET',
+        params
+    },
+      );
+    }
+
+/**
+ * @summary Батч для повторения (SM-2), ограниченный избранными карточками
+ */
+export const getCardsFavoritesReview = (
+    params?: GetCardsFavoritesReviewParams,
+ ) => {
+      return customInstance<GetCardsFavoritesReview200>(
+      {url: `/cards/favorites/review`, method: 'GET',
+        params
+    },
+      );
+    }
+
+/**
+ * @summary Добавить карточку в избранное
+ */
+export const postCardsIdFavorite = (
+    id: string,
+ ) => {
+      return customInstance<void>(
+      {url: `/cards/${id}/favorite`, method: 'POST'
+    },
+      );
+    }
+
+/**
+ * @summary Убрать карточку из избранного
+ */
+export const deleteCardsIdFavorite = (
+    id: string,
+ ) => {
+      return customInstance<void>(
+      {url: `/cards/${id}/favorite`, method: 'DELETE'
+    },
+      );
+    }
+
+/**
+ * @summary Карточки, оценённые текущим пользователем звёздами
+ */
+export const getCardsRated = (
+    params?: GetCardsRatedParams,
+ ) => {
+      return customInstance<GetCardsRated200>(
+      {url: `/cards/rated`, method: 'GET',
+        params
+    },
+      );
+    }
+
+/**
+ * @summary Оценить карточку звёздами (1-5) - независимо от SM-2 grading (/rate)
+ */
+export const postCardsIdStars = (
+    id: string,
+    rateCardStarsRequest: RateCardStarsRequest,
+ ) => {
+      return customInstance<void>(
+      {url: `/cards/${id}/stars`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: rateCardStarsRequest
+    },
+      );
+    }
+
+/**
+ * @summary Убрать свою звёздную оценку
+ */
+export const deleteCardsIdStars = (
+    id: string,
+ ) => {
+      return customInstance<void>(
+      {url: `/cards/${id}/stars`, method: 'DELETE'
     },
       );
     }
@@ -639,6 +821,33 @@ export const deleteCommentsIdReactions = (
       return customInstance<void>(
       {url: `/comments/${id}/reactions`, method: 'DELETE',
         params
+    },
+      );
+    }
+
+/**
+ * @summary Проголосовать за комментарий (up/down) - независимо от эмодзи-реакции
+ */
+export const postCommentsIdVote = (
+    id: string,
+    voteRequest: VoteRequest,
+ ) => {
+      return customInstance<VoteResult>(
+      {url: `/comments/${id}/vote`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: voteRequest
+    },
+      );
+    }
+
+/**
+ * @summary Убрать свой голос с комментария
+ */
+export const deleteCommentsIdVote = (
+    id: string,
+ ) => {
+      return customInstance<VoteResult>(
+      {url: `/comments/${id}/vote`, method: 'DELETE'
     },
       );
     }
@@ -1039,12 +1248,14 @@ export type PostAuthRegisterResult = NonNullable<Awaited<ReturnType<typeof postA
 export type PostAuthLoginResult = NonNullable<Awaited<ReturnType<typeof postAuthLogin>>>
 export type PostAuthRefreshResult = NonNullable<Awaited<ReturnType<typeof postAuthRefresh>>>
 export type PostAuthLogoutResult = NonNullable<Awaited<ReturnType<typeof postAuthLogout>>>
-export type PostAuthForgotPasswordResult = NonNullable<Awaited<ReturnType<typeof postAuthForgotPassword>>>
-export type PostAuthResetPasswordResult = NonNullable<Awaited<ReturnType<typeof postAuthResetPassword>>>
+export type PostAuthPasswordResetResult = NonNullable<Awaited<ReturnType<typeof postAuthPasswordReset>>>
+export type PostAuthPasswordResetConfirmResult = NonNullable<Awaited<ReturnType<typeof postAuthPasswordResetConfirm>>>
 export type GetAuthVerifyEmailResult = NonNullable<Awaited<ReturnType<typeof getAuthVerifyEmail>>>
 export type GetUsersMeResult = NonNullable<Awaited<ReturnType<typeof getUsersMe>>>
 export type PatchUsersMeResult = NonNullable<Awaited<ReturnType<typeof patchUsersMe>>>
 export type DeleteUsersMeResult = NonNullable<Awaited<ReturnType<typeof deleteUsersMe>>>
+export type PostUsersMeLoginChangeResult = NonNullable<Awaited<ReturnType<typeof postUsersMeLoginChange>>>
+export type PostUsersMeLoginChangeConfirmResult = NonNullable<Awaited<ReturnType<typeof postUsersMeLoginChangeConfirm>>>
 export type GetUsersIdResult = NonNullable<Awaited<ReturnType<typeof getUsersId>>>
 export type PostUploadResult = NonNullable<Awaited<ReturnType<typeof postUpload>>>
 export type GetLibraryTextbooksResult = NonNullable<Awaited<ReturnType<typeof getLibraryTextbooks>>>
@@ -1054,8 +1265,19 @@ export type GetLibraryTextbooksIdSourceResult = NonNullable<Awaited<ReturnType<t
 export type PostCardsTasksResult = NonNullable<Awaited<ReturnType<typeof postCardsTasks>>>
 export type GetCardsTasksResult = NonNullable<Awaited<ReturnType<typeof getCardsTasks>>>
 export type GetCardsTasksIdResult = NonNullable<Awaited<ReturnType<typeof getCardsTasksId>>>
+export type PostCardsTasksIdShareResult = NonNullable<Awaited<ReturnType<typeof postCardsTasksIdShare>>>
+export type DeleteCardsTasksIdShareResult = NonNullable<Awaited<ReturnType<typeof deleteCardsTasksIdShare>>>
+export type GetCardsSharedTokenResult = NonNullable<Awaited<ReturnType<typeof getCardsSharedToken>>>
+export type GetCardsCatalogResult = NonNullable<Awaited<ReturnType<typeof getCardsCatalog>>>
 export type GetCardsTasksIdCardsResult = NonNullable<Awaited<ReturnType<typeof getCardsTasksIdCards>>>
 export type GetCardsReviewResult = NonNullable<Awaited<ReturnType<typeof getCardsReview>>>
+export type GetCardsFavoritesResult = NonNullable<Awaited<ReturnType<typeof getCardsFavorites>>>
+export type GetCardsFavoritesReviewResult = NonNullable<Awaited<ReturnType<typeof getCardsFavoritesReview>>>
+export type PostCardsIdFavoriteResult = NonNullable<Awaited<ReturnType<typeof postCardsIdFavorite>>>
+export type DeleteCardsIdFavoriteResult = NonNullable<Awaited<ReturnType<typeof deleteCardsIdFavorite>>>
+export type GetCardsRatedResult = NonNullable<Awaited<ReturnType<typeof getCardsRated>>>
+export type PostCardsIdStarsResult = NonNullable<Awaited<ReturnType<typeof postCardsIdStars>>>
+export type DeleteCardsIdStarsResult = NonNullable<Awaited<ReturnType<typeof deleteCardsIdStars>>>
 export type PostCardsIdRateResult = NonNullable<Awaited<ReturnType<typeof postCardsIdRate>>>
 export type PostCardsIdReportResult = NonNullable<Awaited<ReturnType<typeof postCardsIdReport>>>
 export type GetCardsStatsResult = NonNullable<Awaited<ReturnType<typeof getCardsStats>>>
@@ -1074,6 +1296,8 @@ export type PatchCommentsIdResult = NonNullable<Awaited<ReturnType<typeof patchC
 export type DeleteCommentsIdResult = NonNullable<Awaited<ReturnType<typeof deleteCommentsId>>>
 export type PostCommentsIdReactionsResult = NonNullable<Awaited<ReturnType<typeof postCommentsIdReactions>>>
 export type DeleteCommentsIdReactionsResult = NonNullable<Awaited<ReturnType<typeof deleteCommentsIdReactions>>>
+export type PostCommentsIdVoteResult = NonNullable<Awaited<ReturnType<typeof postCommentsIdVote>>>
+export type DeleteCommentsIdVoteResult = NonNullable<Awaited<ReturnType<typeof deleteCommentsIdVote>>>
 export type PostCommentsIdReportResult = NonNullable<Awaited<ReturnType<typeof postCommentsIdReport>>>
 export type PostSubscriptionsResult = NonNullable<Awaited<ReturnType<typeof postSubscriptions>>>
 export type DeleteSubscriptionsIdResult = NonNullable<Awaited<ReturnType<typeof deleteSubscriptionsId>>>

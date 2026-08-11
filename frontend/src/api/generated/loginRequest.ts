@@ -17,6 +17,7 @@
  */
 
 export interface LoginRequest {
-  email: string;
+  /** Email или login (не nickname) */
+  login: string;
   password: string;
 }

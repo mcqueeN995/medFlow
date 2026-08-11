@@ -19,9 +19,16 @@ import type { University } from './university';
 
 export interface RegisterRequest {
   email: string;
+  /**
+     * Уникальный логин для входа - отдельно от email и nickname, меняется только через подтверждение кодом на email (POST /users/me/login-change)
+     * @minLength 3
+     * @maxLength 50
+     */
+  login: string;
   /** @minLength 8 */
   password: string;
   /**
+     * Отображаемое имя, для входа не используется, меняется свободно
      * @minLength 3
      * @maxLength 50
      */

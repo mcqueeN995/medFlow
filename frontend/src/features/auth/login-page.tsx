@@ -13,7 +13,7 @@ export function LoginPage() {
   const navigate = useNavigate()
   const setSession = useAuthStore((s) => s.setSession)
 
-  const [email, setEmail] = useState('')
+  const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [agreed, setAgreed] = useState(false)
@@ -29,7 +29,7 @@ export function LoginPage() {
     setError(null)
     setSubmitting(true)
     try {
-      const res = await postAuthLogin({ email, password })
+      const res = await postAuthLogin({ login, password })
       if (!res.user || !res.access_token || !res.refresh_token) {
         throw new Error('incomplete auth response')
       }
@@ -47,12 +47,12 @@ export function LoginPage() {
     <AuthLayout>
       <form onSubmit={onSubmit} className="flex flex-col gap-4">
         <Input
-          type="email"
-          placeholder="Логин/почта"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          type="text"
+          placeholder="Логин или почта"
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
           required
-          autoComplete="email"
+          autoComplete="username"
           className="h-12 rounded-full px-5"
         />
 
@@ -75,6 +75,10 @@ export function LoginPage() {
             {showPassword ? <EyeOff className="size-5" /> : <Eye className="size-5" />}
           </button>
         </div>
+
+        <Link to="/forgot-password" className="text-right text-sm text-accent underline underline-offset-2">
+          Забыли пароль?
+        </Link>
 
         <label className="flex items-start gap-2 text-sm text-muted-foreground">
           <Checkbox

@@ -20,16 +20,19 @@ import (
 
 type seedUser struct {
 	email    string
+	login    string
 	password string
 	nickname string
 	role     models.UserRole
 }
 
 // Фиксированные dev-аккаунты с известными паролями — только для отладки.
+// login здесь дополнительный способ входа (см. users.login) - вход также
+// работает по email.
 var seedUsers = []seedUser{
-	{"admin@medflow.dev", "password123", "dev_admin", models.RoleAdmin},
-	{"moderator@medflow.dev", "password123", "dev_moderator", models.RoleModerator},
-	{"user@medflow.dev", "password123", "dev_user", models.RoleUser},
+	{"admin@medflow.dev", "dev_admin", "password123", "dev_admin", models.RoleAdmin},
+	{"moderator@medflow.dev", "dev_moderator", "password123", "dev_moderator", models.RoleModerator},
+	{"user@medflow.dev", "dev_user", "password123", "dev_user", models.RoleUser},
 }
 
 func isProdEnv(env string) bool {
@@ -74,17 +77,18 @@ func main() {
 		}
 
 		_, err = pool.Exec(ctx, `
-			INSERT INTO users (id, email, password_hash, nickname, role, email_verified_at)
-			VALUES ($1, $2, $3, $4, $5, now())
+			INSERT INTO users (id, email, login, password_hash, nickname, role, email_verified_at)
+			VALUES ($1, $2, $3, $4, $5, $6, now())
 			ON CONFLICT (email) DO UPDATE
-			SET password_hash = EXCLUDED.password_hash,
+			SET login = EXCLUDED.login,
+			    password_hash = EXCLUDED.password_hash,
 			    role = EXCLUDED.role,
 			    email_verified_at = now(),
 			    banned_at = NULL,
 			    ban_reason = NULL,
 			    banned_by = NULL,
 			    deleted_at = NULL
-		`, uuid.New(), su.email, hash, su.nickname, su.role)
+		`, uuid.New(), su.email, su.login, hash, su.nickname, su.role)
 		if err != nil {
 			slog.Error("failed to seed user", "email", su.email, "error", err)
 			os.Exit(1)
@@ -95,6 +99,6 @@ func main() {
 
 	fmt.Println("Test accounts (dev only, password for all: password123):")
 	for _, su := range seedUsers {
-		fmt.Printf("  %-9s %s\n", su.role, su.email)
+		fmt.Printf("  %-9s email=%s login=%s\n", su.role, su.email, su.login)
 	}
 }

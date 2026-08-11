@@ -24,15 +24,15 @@ func NewUserRepo(pool *pgxpool.Pool) *UserRepo {
 func (r *UserRepo) Create(ctx context.Context, user *models.User) error {
 	query := `
 		INSERT INTO users (
-			id, email, password_hash, nickname, role, university, course, faculty
+			id, email, password_hash, login, nickname, role, university, course, faculty
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8
+			$1, $2, $3, $4, $5, $6, $7, $8, $9
 		)
 		RETURNING created_at, updated_at
 	`
 
 	err := r.pool.QueryRow(ctx, query,
-		user.ID, user.Email, user.PasswordHash, user.Nickname,
+		user.ID, user.Email, user.PasswordHash, user.Login, user.Nickname,
 		user.Role, user.University, user.Course, user.Faculty,
 	).Scan(&user.CreatedAt, &user.UpdatedAt)
 
@@ -41,6 +41,9 @@ func (r *UserRepo) Create(ctx context.Context, user *models.User) error {
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			if strings.Contains(pgErr.ConstraintName, "email") {
 				return models.ErrEmailAlreadyExists
+			}
+			if strings.Contains(pgErr.ConstraintName, "login") {
+				return models.ErrLoginExists
 			}
 			if strings.Contains(pgErr.ConstraintName, "nickname") {
 				return models.ErrNicknameExists
@@ -54,7 +57,7 @@ func (r *UserRepo) Create(ctx context.Context, user *models.User) error {
 
 func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*models.User, error) {
 	query := `
-		SELECT id, email, password_hash, nickname, role, university, course, faculty,
+		SELECT id, email, password_hash, login, nickname, role, university, course, faculty,
 		       email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
 		FROM users
 		WHERE email = $1 AND deleted_at IS NULL
@@ -62,9 +65,19 @@ func (r *UserRepo) FindByEmail(ctx context.Context, email string) (*models.User,
 	return r.scanUser(ctx, query, email)
 }
 
+func (r *UserRepo) FindByLogin(ctx context.Context, login string) (*models.User, error) {
+	query := `
+		SELECT id, email, password_hash, login, nickname, role, university, course, faculty,
+		       email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
+		FROM users
+		WHERE login = $1 AND deleted_at IS NULL
+	`
+	return r.scanUser(ctx, query, login)
+}
+
 func (r *UserRepo) FindByNickname(ctx context.Context, nickname string) (*models.User, error) {
 	query := `
-		SELECT id, email, password_hash, nickname, role, university, course, faculty,
+		SELECT id, email, password_hash, login, nickname, role, university, course, faculty,
 		       email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
 		FROM users
 		WHERE nickname = $1 AND deleted_at IS NULL
@@ -74,7 +87,7 @@ func (r *UserRepo) FindByNickname(ctx context.Context, nickname string) (*models
 
 func (r *UserRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	query := `
-		SELECT id, email, password_hash, nickname, role, university, course, faculty,
+		SELECT id, email, password_hash, login, nickname, role, university, course, faculty,
 		       email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
 		FROM users
 		WHERE id = $1 AND deleted_at IS NULL
@@ -101,6 +114,37 @@ func (r *UserRepo) Update(ctx context.Context, id uuid.UUID, nickname string, un
 		return nil, models.ErrUserNotFound
 	}
 	return r.FindByID(ctx, id)
+}
+
+// UpdateLogin - финальный шаг смены login (см. UserService.ConfirmLoginChange),
+// отдельно от Update, т.к. login не входит в UpdateProfileRequest и требует
+// собственной проверки уникальности constraint'а.
+func (r *UserRepo) UpdateLogin(ctx context.Context, id uuid.UUID, login string) (*models.User, error) {
+	cmd, err := r.pool.Exec(ctx, `UPDATE users SET login = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, login)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && strings.Contains(pgErr.ConstraintName, "login") {
+			return nil, models.ErrLoginExists
+		}
+		return nil, err
+	}
+	if cmd.RowsAffected() == 0 {
+		return nil, models.ErrUserNotFound
+	}
+	return r.FindByID(ctx, id)
+}
+
+// UpdatePassword - используется восстановлением пароля (AuthService.ConfirmPasswordReset),
+// отдельно от Update, т.к. password_hash не входит в UpdateProfileRequest.
+func (r *UserRepo) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+	cmd, err := r.pool.Exec(ctx, `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id, passwordHash)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return models.ErrUserNotFound
+	}
+	return nil
 }
 
 func (r *UserRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
@@ -138,7 +182,7 @@ func (r *UserRepo) FindPublicByID(ctx context.Context, id uuid.UUID) (*models.Pu
 }
 
 const userSelectColumns = `
-	id, email, password_hash, nickname, role, university, course, faculty,
+	id, email, password_hash, login, nickname, role, university, course, faculty,
 	email_verified_at, banned_at, ban_reason, banned_by, deleted_at, created_at, updated_at
 `
 
@@ -192,7 +236,7 @@ func (r *UserRepo) AdminList(ctx context.Context, f models.AdminUserListFilter) 
 	for rows.Next() {
 		var u models.User
 		if err := rows.Scan(
-			&u.ID, &u.Email, &u.PasswordHash, &u.Nickname, &u.Role, &u.University, &u.Course, &u.Faculty,
+			&u.ID, &u.Email, &u.PasswordHash, &u.Login, &u.Nickname, &u.Role, &u.University, &u.Course, &u.Faculty,
 			&u.EmailVerifiedAt, &u.BannedAt, &u.BanReason, &u.BannedBy, &u.DeletedAt, &u.CreatedAt, &u.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
@@ -245,7 +289,7 @@ func (r *UserRepo) scanUser(ctx context.Context, query string, args ...any) (*mo
 	var user models.User
 
 	err := r.pool.QueryRow(ctx, query, args...).Scan(
-		&user.ID, &user.Email, &user.PasswordHash, &user.Nickname,
+		&user.ID, &user.Email, &user.PasswordHash, &user.Login, &user.Nickname,
 		&user.Role, &user.University, &user.Course, &user.Faculty,
 		&user.EmailVerifiedAt, &user.BannedAt, &user.BanReason, &user.BannedBy, &user.DeletedAt,
 		&user.CreatedAt, &user.UpdatedAt,

@@ -32,4 +32,9 @@ export interface CardTask {
   /** @nullable */
   finished_at?: string | null;
   created_at?: string;
+  /**
+     * Задан, если владелец включил шеринг (см. POST /cards/tasks/{id}/share)
+     * @nullable
+     */
+  share_token?: string | null;
 }

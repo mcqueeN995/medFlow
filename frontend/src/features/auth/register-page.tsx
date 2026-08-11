@@ -22,6 +22,7 @@ export function RegisterPage() {
   const setSession = useAuthStore((s) => s.setSession)
 
   const [email, setEmail] = useState('')
+  const [login, setLogin] = useState('')
   const [password, setPassword] = useState('')
   const [nickname, setNickname] = useState('')
   const [university, setUniversity] = useState<string>('')
@@ -41,6 +42,7 @@ export function RegisterPage() {
     try {
       const res = await postAuthRegister({
         email,
+        login,
         password,
         nickname,
         university: (university as University) || undefined,
@@ -73,7 +75,17 @@ export function RegisterPage() {
         />
         <Input
           type="text"
-          placeholder="Никнейм"
+          placeholder="Логин (для входа)"
+          value={login}
+          onChange={(e) => setLogin(e.target.value)}
+          required
+          minLength={3}
+          autoComplete="username"
+          className="h-12 rounded-full px-5"
+        />
+        <Input
+          type="text"
+          placeholder="Никнейм (отображаемое имя)"
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
           required

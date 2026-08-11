@@ -15,6 +15,7 @@ func createTestUser(t *testing.T, repo *UserRepo, ctx context.Context) *models.U
 	user := &models.User{
 		ID:           uuid.New(),
 		Email:        "test_user_" + uuid.New().String() + "@medflow.local",
+		Login:        "test_login_" + uuid.New().String(),
 		PasswordHash: "test_hash",
 		Nickname:     "test_nick_" + uuid.New().String(),
 		Role:         models.RoleUser,

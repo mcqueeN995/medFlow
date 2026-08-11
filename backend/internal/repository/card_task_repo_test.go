@@ -182,6 +182,126 @@ func TestCardTaskRepo_CountPendingBefore(t *testing.T) {
 	}
 }
 
+func TestCardTaskRepo_ListCatalogFeed_OneEntryPerCacheKey(t *testing.T) {
+	pool := setupTestDB(t)
+	taskRepo := NewCardTaskRepo(pool)
+	textbookRepo := NewTextbookRepo(pool)
+	ctx := context.Background()
+	user1 := createTestForumUser(t, pool)
+	user2 := createTestForumUser(t, pool)
+	textbook := createTestTextbookA(t, pool, textbookRepo, "Anatomy Feed Test "+uuid.NewString())
+	cacheKey := "feedkey-" + uuid.NewString()
+
+	original := createTestCardTask(t, pool, taskRepo, user1.ID, func(ct *models.CardTask) {
+		ct.SourceType = models.SourceCatalogTextbook
+		ct.TextbookID = &textbook.ID
+		ct.CacheKey = &cacheKey
+	})
+	clone := createTestCardTask(t, pool, taskRepo, user2.ID, func(ct *models.CardTask) {
+		ct.SourceType = models.SourceCatalogTextbook
+		ct.TextbookID = &textbook.ID
+		ct.CacheKey = &cacheKey
+	})
+	if err := taskRepo.MarkDone(ctx, original.ID, 5); err != nil {
+		t.Fatalf("MarkDone() [original] error = %v", err)
+	}
+	if err := taskRepo.MarkDone(ctx, clone.ID, 5); err != nil {
+		t.Fatalf("MarkDone() [clone] error = %v", err)
+	}
+
+	entries, total, err := taskRepo.ListCatalogFeed(ctx, models.CardCatalogFeedFilter{Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListCatalogFeed() error = %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("total = %d, want 1 (один канонический task на cache_key, не два клона)", total)
+	}
+	found := false
+	for _, e := range entries {
+		if e.TaskID == original.ID {
+			found = true
+			if e.TextbookTitle != textbook.Title {
+				t.Errorf("TextbookTitle = %q, want %q", e.TextbookTitle, textbook.Title)
+			}
+		}
+		if e.TaskID == clone.ID {
+			t.Errorf("clone.ID appeared in feed - should be deduped by cache_key")
+		}
+	}
+	if !found {
+		t.Errorf("original task %v not found in feed entries %+v", original.ID, entries)
+	}
+}
+
+func TestCardTaskRepo_ListCatalogFeed_ExcludesUserUploadAndNotDone(t *testing.T) {
+	pool := setupTestDB(t)
+	taskRepo := NewCardTaskRepo(pool)
+	textbookRepo := NewTextbookRepo(pool)
+	ctx := context.Background()
+	user := createTestForumUser(t, pool)
+	textbook := createTestTextbookA(t, pool, textbookRepo, "Anatomy Feed Excl Test "+uuid.NewString())
+
+	// user_upload не должен попадать в ленту, даже если помечен done.
+	upload := createTestCardTask(t, pool, taskRepo, user.ID)
+	if err := taskRepo.MarkDone(ctx, upload.ID, 3); err != nil {
+		t.Fatalf("MarkDone() [upload] error = %v", err)
+	}
+
+	// catalog_textbook, но ещё не done - тоже не должен попадать в ленту.
+	pendingCacheKey := "pending-" + uuid.NewString()
+	createTestCardTask(t, pool, taskRepo, user.ID, func(ct *models.CardTask) {
+		ct.SourceType = models.SourceCatalogTextbook
+		ct.TextbookID = &textbook.ID
+		ct.CacheKey = &pendingCacheKey
+	})
+
+	entries, total, err := taskRepo.ListCatalogFeed(ctx, models.CardCatalogFeedFilter{TextbookID: &textbook.ID, Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("ListCatalogFeed() error = %v", err)
+	}
+	if total != 0 || len(entries) != 0 {
+		t.Fatalf("ListCatalogFeed() = %v (total=%d), want empty (user_upload и pending исключены)", entries, total)
+	}
+}
+
+func TestCardTaskRepo_ShareToken_SetFindClear(t *testing.T) {
+	pool := setupTestDB(t)
+	taskRepo := NewCardTaskRepo(pool)
+	ctx := context.Background()
+	user := createTestForumUser(t, pool)
+	task := createTestCardTask(t, pool, taskRepo, user.ID)
+
+	token := "sharetoken-" + uuid.NewString()
+	if err := taskRepo.SetShareToken(ctx, task.ID, token); err != nil {
+		t.Fatalf("SetShareToken() error = %v", err)
+	}
+
+	found, err := taskRepo.FindByShareToken(ctx, token)
+	if err != nil {
+		t.Fatalf("FindByShareToken() error = %v", err)
+	}
+	if found.ID != task.ID {
+		t.Errorf("FindByShareToken() = %v, want %v", found.ID, task.ID)
+	}
+
+	if err := taskRepo.ClearShareToken(ctx, task.ID); err != nil {
+		t.Fatalf("ClearShareToken() error = %v", err)
+	}
+	if _, err := taskRepo.FindByShareToken(ctx, token); err != models.ErrCardTaskNotFound {
+		t.Fatalf("FindByShareToken() after clear error = %v, want ErrCardTaskNotFound", err)
+	}
+}
+
+func TestCardTaskRepo_FindByShareToken_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	taskRepo := NewCardTaskRepo(pool)
+
+	_, err := taskRepo.FindByShareToken(context.Background(), "nonexistent-token")
+	if err != models.ErrCardTaskNotFound {
+		t.Fatalf("FindByShareToken() error = %v, want ErrCardTaskNotFound", err)
+	}
+}
+
 func TestCardTaskRepo_List_FiltersByStatus(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := NewCardTaskRepo(pool)

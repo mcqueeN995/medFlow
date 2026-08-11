@@ -21,6 +21,7 @@ import type { UserRole } from './userRole';
 export interface UserProfile {
   id?: string;
   email?: string;
+  login?: string;
   nickname?: string;
   role?: UserRole;
   university?: University;

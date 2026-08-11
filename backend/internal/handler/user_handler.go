@@ -25,6 +25,10 @@ func MapUserServiceError(c *gin.Context, err error) {
 		RespondWithError(c, http.StatusNotFound, "NOT_FOUND", "user not found", nil)
 	case errors.Is(err, service.ErrNicknameExists):
 		RespondWithError(c, http.StatusConflict, "NICKNAME_EXISTS", "nickname already taken", nil)
+	case errors.Is(err, service.ErrLoginExists):
+		RespondWithError(c, http.StatusConflict, "LOGIN_EXISTS", "login already taken", nil)
+	case errors.Is(err, service.ErrLoginChangeCodeInvalid):
+		RespondWithError(c, http.StatusBadRequest, "INVALID_CODE", "invalid or expired confirmation code", nil)
 	case errors.Is(err, service.ErrInvalidCreds):
 		RespondWithError(c, http.StatusUnauthorized, "INVALID_CREDENTIALS", "invalid password", nil)
 	default:
@@ -60,6 +64,47 @@ func (h *UserHandler) UpdateMe(c *gin.Context) {
 	}
 
 	profile, err := h.userService.UpdateProfile(c.Request.Context(), userID, req)
+	if err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, profile)
+}
+
+// RequestLoginChange POST /api/v1/users/me/login-change
+func (h *UserHandler) RequestLoginChange(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+
+	var req dto.RequestLoginChangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	if err := h.userService.RequestLoginChange(c.Request.Context(), userID, req); err != nil {
+		MapUserServiceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "confirmation code sent"})
+}
+
+// ConfirmLoginChange POST /api/v1/users/me/login-change/confirm
+func (h *UserHandler) ConfirmLoginChange(c *gin.Context) {
+	userID, ok := requireUserID(c)
+	if !ok {
+		return
+	}
+
+	var req dto.ConfirmLoginChangeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		RespondWithError(c, http.StatusBadRequest, "VALIDATION_ERROR", "invalid request body", nil)
+		return
+	}
+
+	profile, err := h.userService.ConfirmLoginChange(c.Request.Context(), userID, req.Code)
 	if err != nil {
 		MapUserServiceError(c, err)
 		return

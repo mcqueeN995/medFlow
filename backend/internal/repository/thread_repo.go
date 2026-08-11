@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/medflow/backend/internal/models"
 )
@@ -70,9 +71,39 @@ func (r *ThreadRepo) FindByID(ctx context.Context, id uuid.UUID) (*models.Thread
 	return t, nil
 }
 
-func (r *ThreadRepo) IncrementViews(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `UPDATE threads SET views_count = views_count + 1 WHERE id = $1`, id)
-	return err
+// IncrementViewsIfNotRecentlyViewed засчитывает просмотр не чаще раза в 24
+// часа на пользователя - см. миграцию 000015_thread_views. WHERE в ON
+// CONFLICT DO UPDATE решает, обновлять ли строку: если last_viewed_at свежее
+// 24 часов, обновления не происходит и RowsAffected() == 0 (аналог DO
+// NOTHING для этой конкретной строки), views_count не трогаем.
+func (r *ThreadRepo) IncrementViewsIfNotRecentlyViewed(ctx context.Context, threadID, userID uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	cmd, err := tx.Exec(ctx, `
+		INSERT INTO thread_views (user_id, thread_id, last_viewed_at)
+		VALUES ($1, $2, now())
+		ON CONFLICT (user_id, thread_id) DO UPDATE SET last_viewed_at = now()
+		WHERE thread_views.last_viewed_at < now() - interval '24 hours'
+	`, userID, threadID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+			return models.ErrThreadNotFound
+		}
+		return err
+	}
+
+	if cmd.RowsAffected() > 0 {
+		if _, err := tx.Exec(ctx, `UPDATE threads SET views_count = views_count + 1 WHERE id = $1`, threadID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *ThreadRepo) Update(ctx context.Context, id uuid.UUID, title, content string, tags []models.ThreadTag) (*models.Thread, error) {

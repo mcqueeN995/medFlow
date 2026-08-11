@@ -55,6 +55,11 @@ type CardTask struct {
 	FinishedAt   *time.Time
 	CreatedAt    time.Time
 
+	// ShareToken - см. CardService.ShareTask/UnshareTask/GetSharedTask и
+	// миграцию 000017_cards_favorites_ratings_share. nil, пока владелец не
+	// включил шеринг.
+	ShareToken *string
+
 	PositionInQueue      *int
 	EstimatedWaitSeconds *int
 }
@@ -121,6 +126,36 @@ type CardTaskListFilter struct {
 	Status *CardTaskStatus
 	Page   int
 	Limit  int
+}
+
+// CardCatalogFeedFilter - лента уже сгенерированных наборов карточек из
+// каталога учебников (source_type=catalog_textbook, status=done), см.
+// CardTaskRepo.ListCatalogFeed. Личные user_upload-задачи в ленту не
+// попадают - у них нет cache_key и они приватны.
+type CardCatalogFeedFilter struct {
+	Q          *string
+	TextbookID *uuid.UUID
+	Difficulty *CardDifficulty
+	Page       int
+	Limit      int
+}
+
+// CardCatalogEntry - одна строка ленты каталога: один канонический task на
+// cache_key (первый дошедший до done), а не каждый пользовательский клон.
+type CardCatalogEntry struct {
+	TaskID        uuid.UUID
+	TextbookID    uuid.UUID
+	TextbookTitle string
+	Topic         *string
+	Difficulty    CardDifficulty
+	CardsCount    int
+	CreatedAt     time.Time
+}
+
+// CardRatingAggregate - см. CardRatingRepo.AggregateForCardsBatch.
+type CardRatingAggregate struct {
+	AverageStars float64
+	RatingsCount int
 }
 
 type CardsStats struct {

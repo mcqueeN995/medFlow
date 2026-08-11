@@ -10,10 +10,20 @@ import (
 	"github.com/medflow/backend/internal/middleware"
 	"github.com/medflow/backend/internal/models"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
+)
+
+// registerLimit/registerWindow - защита /auth/register от массовой
+// регистрации ботов, поверх Redis (единый лимит на все инстансы бэкенда за
+// балансировщиком, в отличие от in-memory middleware.RateLimiter).
+const (
+	registerLimit  = 10
+	registerWindow = time.Hour
 )
 
 func SetupRouter(
 	cfg *config.Config,
+	redisClient *redis.Client,
 	authHandler *handler.AuthHandler,
 	forumHandler *handler.ForumHandler,
 	userHandler *handler.UserHandler,
@@ -53,14 +63,14 @@ func SetupRouter(
 
 	auth := api.Group("/auth")
 	{
-		auth.POST("/register", authHandler.Register)
+		auth.POST("/register", middleware.PerRouteRedisLimiter(redisClient, "register", registerLimit, registerWindow), authHandler.Register)
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/refresh", authHandler.Refresh)
 		auth.POST("/logout", authHandler.Logout)
+		auth.POST("/password-reset", authHandler.RequestPasswordReset)
+		auth.POST("/password-reset/confirm", authHandler.ConfirmPasswordReset)
 
-		// TODO: Добавить после реализации отправки Email / Redis
-		// auth.POST("/forgot-password", authHandler.ForgotPassword)
-		// auth.POST("/reset-password", authHandler.ResetPassword)
+		// TODO: Добавить после реализации отправки Email
 		// auth.GET("/verify-email", authHandler.VerifyEmail)
 	}
 
@@ -71,6 +81,8 @@ func SetupRouter(
 		users.GET("/me", userHandler.Me)
 		users.PATCH("/me", userHandler.UpdateMe)
 		users.DELETE("/me", userHandler.DeleteMe)
+		users.POST("/me/login-change", userHandler.RequestLoginChange)
+		users.POST("/me/login-change/confirm", userHandler.ConfirmLoginChange)
 		users.GET("/:id", userHandler.PublicProfile)
 	}
 
@@ -85,8 +97,15 @@ func SetupRouter(
 		library.GET("/textbooks/:id/source", libraryHandler.Source)
 	}
 
-	// --- CARDS (protected - весь модуль закрыт, security: [] нигде не
-	// переопределён для /cards/* в openapi.yaml) ---
+	// GET /cards/shared/:token - единственное исключение из "весь модуль
+	// закрыт" ниже: публичная страница расшаренного набора, вне
+	// AuthRequired (security: [] в openapi.yaml). Регистрируется на api,
+	// а не на подгруппе cards, поэтому middleware подгруппы на него не
+	// распространяется.
+	api.GET("/cards/shared/:token", cardHandler.GetSharedTask)
+
+	// --- CARDS (protected - весь остальной модуль закрыт, security: []
+	// нигде не переопределён для /cards/* в openapi.yaml, кроме /shared/:token выше) ---
 	cards := api.Group("/cards")
 	cards.Use(middleware.AuthRequired(cfg))
 	{
@@ -94,9 +113,19 @@ func SetupRouter(
 		cards.GET("/tasks", cardHandler.ListTasks)
 		cards.GET("/tasks/:id", cardHandler.GetTask)
 		cards.GET("/tasks/:id/cards", cardHandler.ListTaskCards)
+		cards.POST("/tasks/:id/share", cardHandler.ShareTask)
+		cards.DELETE("/tasks/:id/share", cardHandler.UnshareTask)
+		cards.GET("/catalog", cardHandler.ListCatalogFeed)
 		cards.GET("/review", cardHandler.Review)
 		cards.POST("/:id/rate", cardHandler.RateCard)
 		cards.POST("/:id/report", cardHandler.ReportCard)
+		cards.POST("/:id/favorite", cardHandler.FavoriteCard)
+		cards.DELETE("/:id/favorite", cardHandler.UnfavoriteCard)
+		cards.GET("/favorites", cardHandler.ListFavorites)
+		cards.GET("/favorites/review", cardHandler.ReviewFavorites)
+		cards.POST("/:id/stars", cardHandler.RateCardStars)
+		cards.DELETE("/:id/stars", cardHandler.RemoveCardRating)
+		cards.GET("/rated", cardHandler.ListRatedCards)
 		cards.GET("/stats", cardHandler.Stats)
 	}
 
@@ -152,6 +181,8 @@ func SetupRouter(
 		comments.DELETE("/:id", forumHandler.DeleteComment)
 		comments.POST("/:id/reactions", forumHandler.AddCommentReaction)
 		comments.DELETE("/:id/reactions", forumHandler.RemoveCommentReaction)
+		comments.POST("/:id/vote", forumHandler.VoteComment)
+		comments.DELETE("/:id/vote", forumHandler.RemoveCommentVote)
 		comments.POST("/:id/report", forumHandler.ReportComment)
 	}
 

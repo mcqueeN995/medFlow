@@ -129,15 +129,30 @@ func (r *CommentRepo) SoftDelete(ctx context.Context, id, threadID uuid.UUID) er
 // ListByThread возвращает страницу комментариев верхнего уровня (depth=0) вместе
 // со всеми их прямыми ответами (depth=1) - дерево ограничено двумя уровнями, см.
 // UpdateComment/ForumService.CreateComment, где реплаи на реплаи "схлопываются".
-func (r *CommentRepo) ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int) ([]models.Comment, int, error) {
+// sort="best" сортирует верхний уровень по сумме голосов (см. миграцию
+// 000016_reactions_kind) - коррелированным подзапросом прямо в ORDER BY,
+// чтобы LIMIT/OFFSET пагинация была консистентна с сортировкой (агрегация
+// "в Go после выборки" сломала бы пагинацию: страница 2 могла бы содержать
+// комментарии с более высоким score, чем страница 1). Ответы (depth=1) всегда
+// в хронологическом порядке - сортировка на верхнем уровне не расползается
+// на реплаи.
+func (r *CommentRepo) ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error) {
 	var total int
 	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM comments WHERE thread_id = $1 AND parent_id IS NULL AND deleted_at IS NULL`, threadID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
+	orderBy := "c.created_at ASC"
+	if sort == "best" {
+		orderBy = `(
+			SELECT COALESCE(SUM(CASE r.emoji WHEN 'up' THEN 1 WHEN 'down' THEN -1 ELSE 0 END), 0)
+			FROM reactions r WHERE r.target_type = 'comment' AND r.target_id = c.id AND r.kind = 'vote'
+		) DESC, c.created_at ASC`
+	}
+
 	topQuery := `SELECT ` + commentSelectColumns + ` FROM comments c JOIN users u ON u.id = c.author_id
 		WHERE c.thread_id = $1 AND c.parent_id IS NULL AND c.deleted_at IS NULL
-		ORDER BY c.created_at ASC LIMIT $2 OFFSET $3`
+		ORDER BY ` + orderBy + ` LIMIT $2 OFFSET $3`
 	rows, err := r.pool.Query(ctx, topQuery, threadID, limit, (page-1)*limit)
 	if err != nil {
 		return nil, 0, err

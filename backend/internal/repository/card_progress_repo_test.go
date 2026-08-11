@@ -155,6 +155,45 @@ func TestCardProgressRepo_StatsForUser(t *testing.T) {
 	}
 }
 
+func TestCardProgressRepo_ListDueFavoritesForUser_OnlyFavorited(t *testing.T) {
+	pool := setupTestDB(t)
+	taskRepo := NewCardTaskRepo(pool)
+	cardRepo := NewCardRepo(pool)
+	progressRepo := NewCardProgressRepo(pool)
+	favoriteRepo := NewCardFavoriteRepo(pool)
+	ctx := context.Background()
+	user := createTestForumUser(t, pool)
+	task := createTestCardTask(t, pool, taskRepo, user.ID)
+	cards := createTestCards(t, pool, cardRepo, task.ID, 2)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM card_favorites WHERE user_id = $1", user.ID)
+	})
+
+	if err := progressRepo.CreateBatchDefault(ctx, user.ID, []uuid.UUID{cards[0].ID, cards[1].ID}); err != nil {
+		t.Fatalf("CreateBatchDefault() error = %v", err)
+	}
+	// Обе карточки due (next_review_at=now() по умолчанию), но только первая избранная.
+	if err := favoriteRepo.Add(ctx, user.ID, cards[0].ID); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	due, err := progressRepo.ListDueFavoritesForUser(ctx, user.ID, 20)
+	if err != nil {
+		t.Fatalf("ListDueFavoritesForUser() error = %v", err)
+	}
+	if len(due) != 1 || due[0].ID != cards[0].ID {
+		t.Fatalf("ListDueFavoritesForUser() = %v, want only %v (избранная)", due, cards[0].ID)
+	}
+
+	count, err := progressRepo.CountDueFavoritesForUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("CountDueFavoritesForUser() error = %v", err)
+	}
+	if count != 1 {
+		t.Errorf("CountDueFavoritesForUser() = %d, want 1", count)
+	}
+}
+
 func TestCardProgressRepo_DistinctReviewDaysForUser(t *testing.T) {
 	pool := setupTestDB(t)
 	taskRepo := NewCardTaskRepo(pool)

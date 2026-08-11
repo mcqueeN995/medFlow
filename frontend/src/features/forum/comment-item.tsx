@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { EyeOff, Flame, Reply, ShieldX, Trash2, TriangleAlert } from 'lucide-react'
+import { EyeOff, Flame, Reply, ShieldX, ThumbsDown, ThumbsUp, Trash2, TriangleAlert } from 'lucide-react'
 import type { Comment } from '@/api/generated'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -11,6 +11,7 @@ interface CommentItemProps {
   currentUserId?: string
   reacted: boolean
   onReact: (id: string) => void
+  onVote: (id: string, direction: 'up' | 'down') => void
   onReply: (parentId: string, content: string) => Promise<void>
   onDelete: (id: string) => void
   onReport: (id: string) => void
@@ -26,6 +27,7 @@ export function CommentItem({
   currentUserId,
   reacted,
   onReact,
+  onVote,
   onReply,
   onDelete,
   onReport,
@@ -60,6 +62,33 @@ export function CommentItem({
       </div>
       <p className="text-sm text-foreground">{comment.content}</p>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => onVote(comment.id!, 'up')}
+            className={cn('hover:text-foreground', comment.my_vote === 'up' && 'text-emerald-500')}
+            aria-label="Нравится"
+          >
+            <ThumbsUp className="size-3.5" />
+          </button>
+          <span
+            className={cn(
+              'min-w-[2ch] text-center font-medium',
+              (comment.vote_score ?? 0) > 0 && 'text-emerald-500',
+              (comment.vote_score ?? 0) < 0 && 'text-destructive',
+            )}
+          >
+            {(comment.vote_score ?? 0) > 0 ? `+${comment.vote_score}` : (comment.vote_score ?? 0)}
+          </span>
+          <button
+            type="button"
+            onClick={() => onVote(comment.id!, 'down')}
+            className={cn('hover:text-foreground', comment.my_vote === 'down' && 'text-destructive')}
+            aria-label="Не нравится"
+          >
+            <ThumbsDown className="size-3.5" />
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => onReact(comment.id!)}

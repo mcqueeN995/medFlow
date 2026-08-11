@@ -57,6 +57,44 @@ func TestForumService_CreateThread_Success(t *testing.T) {
 	}
 }
 
+func TestForumService_GetThread_PassesViewerIDToDedupView(t *testing.T) {
+	threadID := uuid.New()
+	viewerID := uuid.New()
+
+	var gotThreadID, gotViewerID uuid.UUID
+	threadRepo := &mockThreadRepository{
+		incrementViewsIfNotRecentlyViewedFn: func(ctx context.Context, tID, uID uuid.UUID) error {
+			gotThreadID, gotViewerID = tID, uID
+			return nil
+		},
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Thread, error) {
+			return &models.Thread{ID: threadID}, nil
+		},
+	}
+	svc := setupTestForumService(threadRepo, nil, nil, nil)
+
+	if _, err := svc.GetThread(context.Background(), threadID, viewerID); err != nil {
+		t.Fatalf("GetThread() error = %v", err)
+	}
+	if gotThreadID != threadID || gotViewerID != viewerID {
+		t.Fatalf("IncrementViewsIfNotRecentlyViewed() called with (%v, %v), want (%v, %v)", gotThreadID, gotViewerID, threadID, viewerID)
+	}
+}
+
+func TestForumService_GetThread_NotFound(t *testing.T) {
+	threadRepo := &mockThreadRepository{
+		incrementViewsIfNotRecentlyViewedFn: func(ctx context.Context, tID, uID uuid.UUID) error {
+			return models.ErrThreadNotFound
+		},
+	}
+	svc := setupTestForumService(threadRepo, nil, nil, nil)
+
+	_, err := svc.GetThread(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrThreadNotFound) {
+		t.Fatalf("GetThread() error = %v, want ErrThreadNotFound", err)
+	}
+}
+
 func TestForumService_UpdateThread_ForbiddenForNonAuthor(t *testing.T) {
 	threadID := uuid.New()
 	authorID := uuid.New()
@@ -332,6 +370,118 @@ func TestForumService_RemoveReaction_NotFound(t *testing.T) {
 	err := svc.RemoveReaction(context.Background(), uuid.New(), models.ReactionTargetThread, uuid.New())
 	if !errors.Is(err, ErrReactionNotFound) {
 		t.Fatalf("RemoveReaction() error = %v, want ErrReactionNotFound", err)
+	}
+}
+
+func TestForumService_VoteComment_Success(t *testing.T) {
+	commentID := uuid.New()
+	userID := uuid.New()
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return &models.Comment{ID: commentID}, nil
+		},
+	}
+	var gotDirection string
+	reactionRepo := &mockReactionRepository{
+		upsertVoteFn: func(ctx context.Context, uID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID, direction string) (*models.Reaction, error) {
+			gotDirection = direction
+			return &models.Reaction{}, nil
+		},
+		voteSummariesFn: func(ctx context.Context, targetType models.ReactionTargetType, targetIDs []uuid.UUID, viewerID uuid.UUID) (map[uuid.UUID]models.VoteSummary, error) {
+			up := "up"
+			return map[uuid.UUID]models.VoteSummary{commentID: {Score: 1, MyVote: &up}}, nil
+		},
+	}
+	svc := setupTestForumService(nil, commentRepo, reactionRepo, nil)
+
+	result, err := svc.VoteComment(context.Background(), userID, commentID, "up")
+	if err != nil {
+		t.Fatalf("VoteComment() error = %v", err)
+	}
+	if gotDirection != "up" {
+		t.Errorf("UpsertVote() called with direction = %q, want up", gotDirection)
+	}
+	if result.Score != 1 || result.MyVote == nil || *result.MyVote != "up" {
+		t.Errorf("VoteComment() = %+v, want Score=1 MyVote=up", result)
+	}
+}
+
+func TestForumService_VoteComment_CommentNotFound(t *testing.T) {
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return nil, models.ErrCommentNotFound
+		},
+	}
+	svc := setupTestForumService(nil, commentRepo, nil, nil)
+
+	_, err := svc.VoteComment(context.Background(), uuid.New(), uuid.New(), "up")
+	if !errors.Is(err, ErrCommentNotFound) {
+		t.Fatalf("VoteComment() error = %v, want ErrCommentNotFound", err)
+	}
+}
+
+func TestForumService_RemoveCommentVote_NotFound(t *testing.T) {
+	reactionRepo := &mockReactionRepository{
+		deleteVoteFn: func(ctx context.Context, userID uuid.UUID, targetType models.ReactionTargetType, targetID uuid.UUID) error {
+			return models.ErrReactionNotFound
+		},
+	}
+	svc := setupTestForumService(nil, nil, reactionRepo, nil)
+
+	_, err := svc.RemoveCommentVote(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrReactionNotFound) {
+		t.Fatalf("RemoveCommentVote() error = %v, want ErrReactionNotFound", err)
+	}
+}
+
+func TestForumService_ListComments_EnrichesTopLevelAndRepliesWithVotes(t *testing.T) {
+	threadID := uuid.New()
+	topID := uuid.New()
+	replyID := uuid.New()
+	viewerID := uuid.New()
+
+	threadRepo := &mockThreadRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Thread, error) {
+			return &models.Thread{ID: threadID}, nil
+		},
+	}
+	var gotSort string
+	commentRepo := &mockCommentRepository{
+		listByThreadFn: func(ctx context.Context, tID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error) {
+			gotSort = sort
+			return []models.Comment{
+				{ID: topID, Replies: []models.Comment{{ID: replyID}}},
+			}, 1, nil
+		},
+	}
+	var gotTargetIDs []uuid.UUID
+	reactionRepo := &mockReactionRepository{
+		voteSummariesFn: func(ctx context.Context, targetType models.ReactionTargetType, targetIDs []uuid.UUID, vID uuid.UUID) (map[uuid.UUID]models.VoteSummary, error) {
+			gotTargetIDs = targetIDs
+			up := "up"
+			return map[uuid.UUID]models.VoteSummary{
+				topID:   {Score: 3, MyVote: &up},
+				replyID: {Score: -1},
+			}, nil
+		},
+	}
+	svc := setupTestForumService(threadRepo, commentRepo, reactionRepo, nil)
+
+	_, items, err := svc.ListComments(context.Background(), threadID, viewerID, 1, 50, "best")
+	if err != nil {
+		t.Fatalf("ListComments() error = %v", err)
+	}
+	if gotSort != "best" {
+		t.Errorf("ListByThread() sort = %q, want best", gotSort)
+	}
+	if len(gotTargetIDs) != 2 {
+		t.Fatalf("VoteSummaries() called with %d IDs, want 2 (top-level + reply, batched)", len(gotTargetIDs))
+	}
+	if len(items) != 1 || items[0].VoteScore != 3 || items[0].MyVote == nil || *items[0].MyVote != "up" {
+		t.Fatalf("items[0] = %+v, want VoteScore=3 MyVote=up", items[0])
+	}
+	if len(items[0].Replies) != 1 || items[0].Replies[0].VoteScore != -1 {
+		t.Fatalf("items[0].Replies = %+v, want single reply VoteScore=-1", items[0].Replies)
 	}
 }
 

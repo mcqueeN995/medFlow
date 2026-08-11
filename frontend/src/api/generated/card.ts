@@ -29,4 +29,12 @@ export interface Card {
   difficulty?: CardDifficulty;
   disclaimer?: string;
   created_at?: string;
+  /** @nullable */
+  is_favorite?: boolean | null;
+  /** @nullable */
+  average_stars?: number | null;
+  /** @nullable */
+  ratings_count?: number | null;
+  /** @nullable */
+  my_stars?: number | null;
 }

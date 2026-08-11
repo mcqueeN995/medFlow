@@ -7,6 +7,7 @@ import {
   deleteAdminThreadsId,
   deleteCommentsId,
   deleteCommentsIdReactions,
+  deleteCommentsIdVote,
   deleteThreadsId,
   deleteThreadsIdReactions,
   getThreadsId,
@@ -16,6 +17,7 @@ import {
   postAdminThreadsIdHide,
   postCommentsIdReactions,
   postCommentsIdReport,
+  postCommentsIdVote,
   postThreadsThreadIdComments,
   postThreadsIdReactions,
   postThreadsIdReport,
@@ -47,6 +49,7 @@ export function ThreadDetailPage() {
   const [commentsLoading, setCommentsLoading] = useState(true)
   const [commentText, setCommentText] = useState('')
   const [postingComment, setPostingComment] = useState(false)
+  const [sort, setSort] = useState<'new' | 'best'>('new')
 
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -74,16 +77,20 @@ export function ThreadDetailPage() {
   function loadComments() {
     if (!id) return
     setCommentsLoading(true)
-    getThreadsIdComments(id, { limit: 100 })
+    getThreadsIdComments(id, { limit: 100, sort })
       .then((res) => setComments(res.data ?? []))
       .finally(() => setCommentsLoading(false))
   }
 
   useEffect(() => {
     loadThread()
-    loadComments()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  useEffect(() => {
+    loadComments()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, sort])
 
   async function toggleThreadReaction() {
     if (!id) return
@@ -130,6 +137,46 @@ export function ThreadDetailPage() {
       )
     } catch {
       toast.error('Не удалось поставить реакцию')
+    }
+  }
+
+  function findComment(commentId: string): CommentTree | undefined {
+    for (const c of comments) {
+      if (c.id === commentId) return c
+      const reply = c.replies?.find((r) => r.id === commentId)
+      if (reply) return reply as CommentTree
+    }
+    return undefined
+  }
+
+  function applyVoteResult(commentId: string, score?: number, myVote?: 'up' | 'down' | null) {
+    setComments((prev) =>
+      prev.map((c) => {
+        if (c.id === commentId) return { ...c, vote_score: score ?? 0, my_vote: myVote ?? undefined }
+        if (c.replies?.some((r) => r.id === commentId)) {
+          return {
+            ...c,
+            replies: c.replies.map((r) => (r.id === commentId ? { ...r, vote_score: score ?? 0, my_vote: myVote ?? undefined } : r)),
+          }
+        }
+        return c
+      }),
+    )
+  }
+
+  // Клик по уже выбранному направлению снимает голос (toggle); клик по
+  // противоположному - меняет направление одним запросом (backend делает
+  // ON CONFLICT DO UPDATE, отдельного вызова "снять старый голос" не нужно).
+  async function voteComment(commentId: string, direction: 'up' | 'down') {
+    const current = findComment(commentId)
+    try {
+      const result =
+        current?.my_vote === direction
+          ? await deleteCommentsIdVote(commentId)
+          : await postCommentsIdVote(commentId, { direction })
+      applyVoteResult(commentId, result.score, result.my_vote)
+    } catch {
+      toast.error('Не удалось проголосовать')
     }
   }
 
@@ -384,7 +431,31 @@ export function ThreadDetailPage() {
       </div>
 
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-6">
-        <h2 className="font-semibold text-foreground">Комментарии ({thread.comments_count ?? 0})</h2>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-semibold text-foreground">Комментарии ({thread.comments_count ?? 0})</h2>
+          <div className="flex items-center gap-1 rounded-full bg-secondary p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setSort('new')}
+              className={cn(
+                'rounded-full px-3 py-1 transition-colors',
+                sort === 'new' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground',
+              )}
+            >
+              Новые
+            </button>
+            <button
+              type="button"
+              onClick={() => setSort('best')}
+              className={cn(
+                'rounded-full px-3 py-1 transition-colors',
+                sort === 'best' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground',
+              )}
+            >
+              Лучшие
+            </button>
+          </div>
+        </div>
 
         <div className="flex flex-col gap-2">
           <Textarea
@@ -422,6 +493,7 @@ export function ThreadDetailPage() {
                   currentUserId={currentUserId}
                   reacted={reactedComments.has(c.id!)}
                   onReact={toggleCommentReaction}
+                  onVote={voteComment}
                   onReply={submitReply}
                   onDelete={deleteComment}
                   onReport={reportComment}
@@ -437,6 +509,7 @@ export function ThreadDetailPage() {
                     currentUserId={currentUserId}
                     reacted={reactedComments.has(r.id!)}
                     onReact={toggleCommentReaction}
+                    onVote={voteComment}
                     onReply={submitReply}
                     onDelete={deleteComment}
                     onReport={reportComment}

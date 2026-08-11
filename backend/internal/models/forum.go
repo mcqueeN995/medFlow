@@ -26,6 +26,17 @@ const (
 	ReactionTargetComment ReactionTargetType = "comment"
 )
 
+// ReactionKind различает обычную эмодзи-реакцию (лайк) от голоса
+// up/down за комментарий - обе живут в одной таблице reactions, но
+// независимо друг от друга на одной и той же цели (см. миграцию
+// 000016_reactions_kind).
+type ReactionKind string
+
+const (
+	ReactionKindEmoji ReactionKind = "emoji"
+	ReactionKindVote  ReactionKind = "vote"
+)
+
 type ReportStatus string
 
 const (
@@ -86,7 +97,17 @@ type Reaction struct {
 	TargetType ReactionTargetType
 	TargetID   uuid.UUID
 	Emoji      string
+	Kind       ReactionKind
 	CreatedAt  time.Time
+}
+
+// VoteSummary - агрегат голосов up/down за одну цель, см.
+// ReactionRepo.VoteSummaries. Score = (кол-во up) - (кол-во down);
+// MyVote - направление голоса viewerID, если он голосовал ("up"/"down"),
+// иначе nil.
+type VoteSummary struct {
+	Score  int
+	MyVote *string
 }
 
 type ThreadListFilter struct {

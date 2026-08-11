@@ -25,6 +25,7 @@ type CardTask struct {
 	StartedAt            *time.Time            `json:"started_at"`
 	FinishedAt           *time.Time            `json:"finished_at"`
 	CreatedAt            time.Time             `json:"created_at"`
+	ShareToken           *string               `json:"share_token,omitempty"`
 }
 
 func ToCardTask(t *models.CardTask) CardTask {
@@ -38,6 +39,7 @@ func ToCardTask(t *models.CardTask) CardTask {
 	return CardTask{
 		ID: t.ID.String(), Status: t.Status, PositionInQueue: t.PositionInQueue, EstimatedWaitSeconds: t.EstimatedWaitSeconds,
 		CardsCount: cardsCount, ErrorMessage: t.ErrorMessage, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt, CreatedAt: t.CreatedAt,
+		ShareToken: t.ShareToken,
 	}
 }
 
@@ -53,6 +55,14 @@ type Card struct {
 	Difficulty      models.CardDifficulty `json:"difficulty"`
 	Disclaimer      string                `json:"disclaimer"`
 	CreatedAt       time.Time             `json:"created_at"`
+	// IsFavorite/AverageStars/RatingsCount/MyStars заполняются батчем в
+	// CardService.enrichCards - там же, где ListTaskCards/ListFavorites/
+	// ListRatedCards собирают карточки в dto.Card. nil, если карточки не
+	// обогащались (напр. CreateComment-подобные единичные ответы).
+	IsFavorite   *bool    `json:"is_favorite,omitempty"`
+	AverageStars *float64 `json:"average_stars,omitempty"`
+	RatingsCount *int     `json:"ratings_count,omitempty"`
+	MyStars      *int     `json:"my_stars,omitempty"`
 }
 
 func ToCard(c *models.Card) Card {
@@ -131,4 +141,43 @@ type CreateCardTaskRequest struct {
 // валидная оценка, а required у Gin считает нулевое значение int отсутствующим.
 type RateCardRequest struct {
 	Grade int `json:"grade" binding:"min=0,max=3"`
+}
+
+// RateCardStarsRequest - звёздный рейтинг карточки (1-5), не путать с
+// RateCardRequest (SM-2 grading, /cards/:id/rate) - разные фичи, разные
+// глаголы API (/cards/:id/stars).
+type RateCardStarsRequest struct {
+	Stars int `json:"stars" binding:"required,min=1,max=5"`
+}
+
+// CardCatalogEntry - строка ленты каталога (см. CardService.ListCatalogFeed).
+type CardCatalogEntry struct {
+	TaskID        string                `json:"task_id"`
+	TextbookID    string                `json:"textbook_id"`
+	TextbookTitle string                `json:"textbook_title"`
+	Topic         *string               `json:"topic,omitempty"`
+	Difficulty    models.CardDifficulty `json:"difficulty"`
+	CardsCount    int                   `json:"cards_count"`
+	CreatedAt     time.Time             `json:"created_at"`
+}
+
+func ToCardCatalogEntry(e *models.CardCatalogEntry) CardCatalogEntry {
+	return CardCatalogEntry{
+		TaskID: e.TaskID.String(), TextbookID: e.TextbookID.String(), TextbookTitle: e.TextbookTitle,
+		Topic: e.Topic, Difficulty: e.Difficulty, CardsCount: e.CardsCount, CreatedAt: e.CreatedAt,
+	}
+}
+
+type ShareTaskResponse struct {
+	ShareToken string `json:"share_token"`
+}
+
+// SharedCardTask - публичный ответ GET /cards/shared/:token (без auth) -
+// сознательно урезан относительно CardTask/Card: ни id задачи, ни
+// владелец, ни служебные поля не раскрываются, только то, что нужно для
+// просмотра набора по ссылке.
+type SharedCardTask struct {
+	Topic      *string               `json:"topic,omitempty"`
+	Difficulty models.CardDifficulty `json:"difficulty"`
+	Cards      []Card                `json:"cards"`
 }

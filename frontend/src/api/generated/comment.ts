@@ -15,6 +15,7 @@
  *
  * OpenAPI spec version: 1.0.0
  */
+import type { CommentMyVote } from './commentMyVote';
 import type { PublicUser } from './publicUser';
 
 export interface Comment {
@@ -23,6 +24,13 @@ export interface Comment {
   content?: string;
   depth?: number;
   likes_count?: number;
+  /** Сумма голосов up(+1)/down(-1) */
+  vote_score?: number;
+  /**
+     * Направление голоса текущего пользователя, если голосовал
+     * @nullable
+     */
+  my_vote?: CommentMyVote;
   /** @nullable */
   hidden_at?: string | null;
   /** @nullable */

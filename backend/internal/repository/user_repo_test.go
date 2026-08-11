@@ -14,11 +14,13 @@ func TestUserRepo_Create_Success(t *testing.T) {
 	ctx := context.Background()
 
 	uniqueEmail := "test_create_" + uuid.New().String() + "@medflow.local"
+	uniqueLogin := "test_create_" + uuid.New().String()
 	uniqueNick := "test_create_" + uuid.New().String()
 
 	user := &models.User{
 		ID:           uuid.New(),
 		Email:        uniqueEmail,
+		Login:        uniqueLogin,
 		PasswordHash: "hashed_password",
 		Nickname:     uniqueNick,
 		Role:         models.RoleUser,
@@ -48,14 +50,14 @@ func TestUserRepo_Create_DuplicateEmail(t *testing.T) {
 	uniqueNick := "test_dup_" + uuid.New().String()
 
 	user1 := &models.User{
-		ID: uuid.New(), Email: uniqueEmail, PasswordHash: "hash",
+		ID: uuid.New(), Email: uniqueEmail, Login: "login_" + uuid.New().String(), PasswordHash: "hash",
 		Nickname: uniqueNick, Role: models.RoleUser,
 	}
 	_ = repo.Create(ctx, user1)
 	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user1.ID) }()
 
 	user2 := &models.User{
-		ID: uuid.New(), Email: uniqueEmail, PasswordHash: "hash",
+		ID: uuid.New(), Email: uniqueEmail, Login: "login_" + uuid.New().String(), PasswordHash: "hash",
 		Nickname: "another_nick", Role: models.RoleUser,
 	}
 
@@ -71,10 +73,11 @@ func TestUserRepo_FindByEmail_Success(t *testing.T) {
 	ctx := context.Background()
 
 	uniqueEmail := "test_find_" + uuid.New().String() + "@medflow.local"
+	uniqueLogin := "test_find_" + uuid.New().String()
 	uniqueNick := "test_find_" + uuid.New().String()
 
 	user := &models.User{
-		ID: uuid.New(), Email: uniqueEmail, PasswordHash: "hash",
+		ID: uuid.New(), Email: uniqueEmail, Login: uniqueLogin, PasswordHash: "hash",
 		Nickname: uniqueNick, Role: models.RoleAdmin,
 	}
 	_ = repo.Create(ctx, user)
@@ -110,10 +113,11 @@ func TestUserRepo_FindByNickname_Success(t *testing.T) {
 	ctx := context.Background()
 
 	uniqueEmail := "test_nick_" + uuid.New().String() + "@medflow.local"
+	uniqueLogin := "test_nick_" + uuid.New().String()
 	uniqueNick := "test_nick_" + uuid.New().String()
 
 	user := &models.User{
-		ID: uuid.New(), Email: uniqueEmail, PasswordHash: "hash",
+		ID: uuid.New(), Email: uniqueEmail, Login: uniqueLogin, PasswordHash: "hash",
 		Nickname: uniqueNick, Role: models.RoleUser,
 	}
 	_ = repo.Create(ctx, user)
@@ -126,6 +130,94 @@ func TestUserRepo_FindByNickname_Success(t *testing.T) {
 
 	if found.Nickname != uniqueNick {
 		t.Errorf("FindByNickname() Nickname = %v, want %v", found.Nickname, uniqueNick)
+	}
+}
+
+func TestUserRepo_FindByLogin_Success(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+
+	uniqueEmail := "test_login_" + uuid.New().String() + "@medflow.local"
+	uniqueLogin := "test_login_" + uuid.New().String()
+	uniqueNick := "test_login_" + uuid.New().String()
+
+	user := &models.User{
+		ID: uuid.New(), Email: uniqueEmail, Login: uniqueLogin, PasswordHash: "hash",
+		Nickname: uniqueNick, Role: models.RoleUser,
+	}
+	_ = repo.Create(ctx, user)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID) }()
+
+	found, err := repo.FindByLogin(ctx, uniqueLogin)
+	if err != nil {
+		t.Fatalf("FindByLogin() error = %v", err)
+	}
+	if found.ID != user.ID {
+		t.Errorf("FindByLogin() ID = %v, want %v", found.ID, user.ID)
+	}
+}
+
+func TestUserRepo_FindByLogin_NotFound(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+
+	_, err := repo.FindByLogin(context.Background(), "nonexistent_login")
+	if err != models.ErrUserNotFound {
+		t.Errorf("FindByLogin() error = %v, want %v", err, models.ErrUserNotFound)
+	}
+}
+
+func TestUserRepo_UpdateLogin_Success(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	user := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID) }()
+
+	newLogin := "updated_login_" + uuid.New().String()
+	updated, err := repo.UpdateLogin(ctx, user.ID, newLogin)
+	if err != nil {
+		t.Fatalf("UpdateLogin() error = %v", err)
+	}
+	if updated.Login != newLogin {
+		t.Errorf("Login = %q, want %q", updated.Login, newLogin)
+	}
+}
+
+func TestUserRepo_UpdateLogin_DuplicateLogin(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	user1 := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user1.ID) }()
+	user2 := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user2.ID) }()
+
+	_, err := repo.UpdateLogin(ctx, user2.ID, user1.Login)
+	if err != models.ErrLoginExists {
+		t.Fatalf("UpdateLogin() error = %v, want ErrLoginExists", err)
+	}
+}
+
+func TestUserRepo_UpdatePassword_Success(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewUserRepo(pool)
+	ctx := context.Background()
+	user := createTestUser(t, repo, ctx)
+	defer func() { _, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID) }()
+
+	newHash := "new_hash_" + uuid.New().String()
+	if err := repo.UpdatePassword(ctx, user.ID, newHash); err != nil {
+		t.Fatalf("UpdatePassword() error = %v", err)
+	}
+
+	found, err := repo.FindByID(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("FindByID() error = %v", err)
+	}
+	if found.PasswordHash != newHash {
+		t.Errorf("PasswordHash = %q, want %q", found.PasswordHash, newHash)
 	}
 }
 

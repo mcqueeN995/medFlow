@@ -143,54 +143,41 @@ paths:
       responses:
         '204': { description: Успешный выход }
 
-  /auth/forgot-password:
+  /auth/password-reset:
     post:
       tags: [Auth]
-      summary: Запрос ссылки для сброса пароля
+      summary: Запрос кода восстановления пароля (email или логин) - не раскрывает существование аккаунта
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [email]
-              properties:
-                email: { type: string, format: email }
+              $ref: '#/components/schemas/RequestPasswordResetRequest'
       responses:
         '200':
-          description: Всегда 200 (не раскрывает существование email)
+          description: Всегда 200 - если аккаунт существует, код отправлен на его email
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   message: { type: string }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
-  /auth/reset-password:
+  /auth/password-reset/confirm:
     post:
       tags: [Auth]
-      summary: Сброс пароля по токену из email
+      summary: Подтверждение восстановления пароля кодом из письма + новый пароль
       security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [token, new_password]
-              properties:
-                token: { type: string }
-                new_password: { type: string, minLength: 8 }
+              $ref: '#/components/schemas/ConfirmPasswordResetRequest'
       responses:
-        '200':
-          description: Пароль сброшен
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message: { type: string }
+        '204': { description: "Пароль обновлён, все refresh-токены отозваны" }
         '400': { $ref: '#/components/responses/BadRequest' }
 
   /auth/verify-email:
@@ -255,6 +242,48 @@ paths:
       responses:
         '204': { description: Аккаунт удалён }
         '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /users/me/login-change:
+    post:
+      tags: [Users]
+      summary: Запрос смены логина - проверяет пароль, шлёт код на текущий email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RequestLoginChangeRequest'
+      responses:
+        '200':
+          description: Код отправлен на email
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /users/me/login-change/confirm:
+    post:
+      tags: [Users]
+      summary: Подтверждение смены логина кодом из письма
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmLoginChangeRequest'
+      responses:
+        '200':
+          description: Логин изменён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
 
   /users/{id}:
     get:
@@ -474,6 +503,91 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /cards/tasks/{id}/share:
+    post:
+      tags: [Cards]
+      summary: Включить публичную ссылку на набор карточек задачи (владелец; идемпотентно)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Токен шеринга
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareTaskResponse'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Cards]
+      summary: Выключить публичную ссылку (владелец)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Шеринг выключен }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cards/shared/{token}:
+    get:
+      tags: [Cards]
+      summary: Публичный просмотр расшаренного набора карточек по токену
+      security: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Набор карточек
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SharedCardTask'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cards/catalog:
+    get:
+      tags: [Cards]
+      summary: Лента уже сгенерированных наборов из каталога учебников (один на cache_key)
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string }
+        - name: textbook_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: difficulty
+          in: query
+          schema: { $ref: '#/components/schemas/CardDifficulty' }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+      responses:
+        '200':
+          description: Лента каталога
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/CardCatalogEntry'
+
   /cards/tasks/{id}/cards:
     get:
       tags: [Cards]
@@ -526,6 +640,137 @@ paths:
                     items:
                       $ref: '#/components/schemas/ReviewCard'
                   count: { type: integer }
+
+  /cards/favorites:
+    get:
+      tags: [Cards]
+      summary: Избранные карточки текущего пользователя
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Избранные карточки
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Card'
+
+  /cards/favorites/review:
+    get:
+      tags: [Cards]
+      summary: Батч для повторения (SM-2), ограниченный избранными карточками
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, maximum: 50 }
+      responses:
+        '200':
+          description: Батч карточек
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ReviewCard'
+                  count: { type: integer }
+
+  /cards/{id}/favorite:
+    post:
+      tags: [Cards]
+      summary: Добавить карточку в избранное
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Добавлено }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Cards]
+      summary: Убрать карточку из избранного
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Убрано }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /cards/rated:
+    get:
+      tags: [Cards]
+      summary: Карточки, оценённые текущим пользователем звёздами
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: Оценённые карточки
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginationWrapper'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Card'
+
+  /cards/{id}/stars:
+    post:
+      tags: [Cards]
+      summary: Оценить карточку звёздами (1-5) - независимо от SM-2 grading (/rate)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RateCardStarsRequest'
+      responses:
+        '204': { description: Оценка сохранена }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Cards]
+      summary: Убрать свою звёздную оценку
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Убрано }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /cards/{id}/rate:
     post:
@@ -822,6 +1067,10 @@ paths:
         - name: limit
           in: query
           schema: { type: integer, default: 50 }
+        - name: sort
+          in: query
+          description: "new - по времени (по умолчанию), best - по сумме голосов up/down"
+          schema: { type: string, enum: [new, best], default: new }
       responses:
         '200':
           description: Дерево комментариев
@@ -939,6 +1188,46 @@ paths:
           schema: { type: string }
       responses:
         '204': { description: Реакция убрана }
+
+  /comments/{id}/vote:
+    post:
+      tags: [Comments]
+      summary: Проголосовать за комментарий (up/down) - независимо от эмодзи-реакции
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VoteRequest'
+      responses:
+        '200':
+          description: Голос учтён
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoteResult'
+        '400': { $ref: '#/components/responses/BadRequest' }
+    delete:
+      tags: [Comments]
+      summary: Убрать свой голос с комментария
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Голос убран
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoteResult'
+        '404': { $ref: '#/components/responses/NotFound' }
 
   /comments/{id}/report:
     post:
@@ -1737,11 +2026,12 @@ components:
     # ---------- Auth ----------
     RegisterRequest:
       type: object
-      required: [email, password, nickname, agree_to_terms]
+      required: [email, login, password, nickname, agree_to_terms]
       properties:
         email: { type: string, format: email }
+        login: { type: string, minLength: 3, maxLength: 50, description: "Уникальный логин для входа - отдельно от email и nickname, меняется только через подтверждение кодом на email (POST /users/me/login-change)" }
         password: { type: string, minLength: 8 }
-        nickname: { type: string, minLength: 3, maxLength: 50 }
+        nickname: { type: string, minLength: 3, maxLength: 50, description: "Отображаемое имя, для входа не используется, меняется свободно" }
         university: { $ref: '#/components/schemas/University' }
         course: { type: integer, minimum: 1, maximum: 7 }
         faculty: { type: string, maxLength: 100 }
@@ -1749,10 +2039,36 @@ components:
 
     LoginRequest:
       type: object
-      required: [email, password]
+      required: [login, password]
       properties:
-        email: { type: string, format: email }
+        login: { type: string, description: "Email или login (не nickname)" }
         password: { type: string }
+
+    RequestLoginChangeRequest:
+      type: object
+      required: [new_login, current_password]
+      properties:
+        new_login: { type: string, minLength: 3, maxLength: 50 }
+        current_password: { type: string }
+
+    ConfirmLoginChangeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string, description: "6-значный код из письма" }
+
+    RequestPasswordResetRequest:
+      type: object
+      required: [login]
+      properties:
+        login: { type: string, minLength: 3, maxLength: 255, description: "Email или users.login забытого аккаунта" }
+
+    ConfirmPasswordResetRequest:
+      type: object
+      required: [code, new_password]
+      properties:
+        code: { type: string, description: "6-значный код из письма" }
+        new_password: { type: string, minLength: 8, maxLength: 100 }
 
     RefreshRequest:
       type: object
@@ -1798,6 +2114,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         email: { type: string, format: email }
+        login: { type: string }
         nickname: { type: string }
         role: { $ref: '#/components/schemas/UserRole' }
         university: { $ref: '#/components/schemas/University' }
@@ -1941,6 +2258,7 @@ components:
         started_at: { type: string, format: date-time, nullable: true }
         finished_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
+        share_token: { type: string, nullable: true, description: "Задан, если владелец включил шеринг (см. POST /cards/tasks/{id}/share)" }
 
     Card:
       type: object
@@ -1956,6 +2274,10 @@ components:
         difficulty: { $ref: '#/components/schemas/CardDifficulty' }
         disclaimer: { type: string }
         created_at: { type: string, format: date-time }
+        is_favorite: { type: boolean, nullable: true }
+        average_stars: { type: number, format: double, nullable: true }
+        ratings_count: { type: integer, nullable: true }
+        my_stars: { type: integer, nullable: true }
 
     ReviewCard:
       type: object
@@ -1987,6 +2309,37 @@ components:
             easy: { type: integer }
             medium: { type: integer }
             hard: { type: integer }
+
+    RateCardStarsRequest:
+      type: object
+      required: [stars]
+      properties:
+        stars: { type: integer, minimum: 1, maximum: 5 }
+
+    CardCatalogEntry:
+      type: object
+      properties:
+        task_id: { type: string, format: uuid }
+        textbook_id: { type: string, format: uuid }
+        textbook_title: { type: string }
+        topic: { type: string, nullable: true }
+        difficulty: { $ref: '#/components/schemas/CardDifficulty' }
+        cards_count: { type: integer }
+        created_at: { type: string, format: date-time }
+
+    ShareTaskResponse:
+      type: object
+      properties:
+        share_token: { type: string }
+
+    SharedCardTask:
+      type: object
+      properties:
+        topic: { type: string, nullable: true }
+        difficulty: { $ref: '#/components/schemas/CardDifficulty' }
+        cards:
+          type: array
+          items: { $ref: '#/components/schemas/Card' }
 
     # ---------- Map ----------
     POI:
@@ -2102,6 +2455,8 @@ components:
         content: { type: string }
         depth: { type: integer }
         likes_count: { type: integer }
+        vote_score: { type: integer, description: "Сумма голосов up(+1)/down(-1)" }
+        my_vote: { type: string, enum: [up, down], nullable: true, description: "Направление голоса текущего пользователя, если голосовал" }
         hidden_at: { type: string, format: date-time, nullable: true }
         deleted_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
@@ -2121,6 +2476,18 @@ components:
       properties:
         content: { type: string, minLength: 1, maxLength: 5000 }
         parent_id: { type: string, format: uuid, nullable: true }
+
+    VoteRequest:
+      type: object
+      required: [direction]
+      properties:
+        direction: { type: string, enum: [up, down] }
+
+    VoteResult:
+      type: object
+      properties:
+        score: { type: integer }
+        my_vote: { type: string, enum: [up, down], nullable: true }
 
     # ---------- Reactions ----------
     Reaction:

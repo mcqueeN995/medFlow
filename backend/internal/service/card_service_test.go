@@ -26,6 +26,23 @@ func setupTestCardService(
 	llmProvider *mockLLMProvider,
 	enqueuer *mockTaskEnqueuer,
 ) *CardService {
+	return setupTestCardServiceFull(taskRepo, cardRepo, progressRepo, nil, nil, chunkRepo, textbookRepo, uploadRepo, reportRepo, storage, llmProvider, enqueuer)
+}
+
+func setupTestCardServiceFull(
+	taskRepo *mockCardTaskRepository,
+	cardRepo *mockCardRepository,
+	progressRepo *mockCardProgressRepository,
+	favoriteRepo *mockCardFavoriteRepository,
+	ratingRepo *mockCardRatingRepository,
+	chunkRepo *mockTextbookChunkRepository,
+	textbookRepo *mockTextbookRepository,
+	uploadRepo *mockUploadRepository,
+	reportRepo *mockReportRepository,
+	storage *mockObjectStorage,
+	llmProvider *mockLLMProvider,
+	enqueuer *mockTaskEnqueuer,
+) *CardService {
 	if taskRepo == nil {
 		taskRepo = &mockCardTaskRepository{}
 	}
@@ -34,6 +51,12 @@ func setupTestCardService(
 	}
 	if progressRepo == nil {
 		progressRepo = &mockCardProgressRepository{}
+	}
+	if favoriteRepo == nil {
+		favoriteRepo = &mockCardFavoriteRepository{}
+	}
+	if ratingRepo == nil {
+		ratingRepo = &mockCardRatingRepository{}
 	}
 	if chunkRepo == nil {
 		chunkRepo = &mockTextbookChunkRepository{}
@@ -60,7 +83,7 @@ func setupTestCardService(
 	if enqueuer == nil {
 		enqueuer = &mockTaskEnqueuer{}
 	}
-	return NewCardService(taskRepo, cardRepo, progressRepo, chunkRepo, textbookRepo, uploadRepo, reportRepo, storage, llmProvider, llmProvider, enqueuer, &mockPushNotifier{})
+	return NewCardService(taskRepo, cardRepo, progressRepo, favoriteRepo, ratingRepo, chunkRepo, textbookRepo, uploadRepo, reportRepo, storage, llmProvider, llmProvider, enqueuer, &mockPushNotifier{})
 }
 
 // ==================== CreateTask ====================
@@ -319,7 +342,248 @@ func TestCardService_ReportCard_IncrementsAndCreatesReport(t *testing.T) {
 
 // ==================== ownership ====================
 
-func TestCardService_GetTask_ForbiddenForNonOwner(t *testing.T) {
+func TestCardService_GetTask_ForbiddenForNonOwner_UserUpload(t *testing.T) {
+	owner := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: id, UserID: owner, SourceType: models.SourceUserUpload, Status: models.CardTaskDone}, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, err := svc.GetTask(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("GetTask() error = %v, want ErrForbidden (личная user_upload-задача чужого пользователя)", err)
+	}
+}
+
+// TestCardService_GetTask_AllowedForNonOwner_CatalogTextbook - ослабление
+// владения: catalog_textbook-задачи переиспользуются между пользователями
+// (см. cache_key/CloneForTask), поэтому доступны любому авторизованному, не
+// только автору.
+func TestCardService_GetTask_AllowedForNonOwner_CatalogTextbook(t *testing.T) {
+	owner := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: id, UserID: owner, SourceType: models.SourceCatalogTextbook, Status: models.CardTaskDone}, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, err := svc.GetTask(context.Background(), uuid.New(), uuid.New())
+	if err != nil {
+		t.Fatalf("GetTask() error = %v, want nil (catalog_textbook доступна не только автору)", err)
+	}
+}
+
+// ==================== ListTaskCards / enrichCards ====================
+
+func TestCardService_ListTaskCards_ForbiddenForNonOwner_UserUpload(t *testing.T) {
+	owner := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: id, UserID: owner, SourceType: models.SourceUserUpload, Status: models.CardTaskDone}, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, _, err := svc.ListTaskCards(context.Background(), uuid.New(), uuid.New(), 1, 50)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListTaskCards() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCardService_ListTaskCards_EnrichesWithFavoriteAndRating(t *testing.T) {
+	cardID := uuid.New()
+	taskID := uuid.New()
+	viewerID := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: uuid.New(), SourceType: models.SourceCatalogTextbook, Status: models.CardTaskDone}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		listByTaskFn: func(ctx context.Context, tID uuid.UUID, page, limit int) ([]models.Card, int, error) {
+			return []models.Card{{ID: cardID, TaskID: taskID, Question: "q", Answer: "a"}}, 1, nil
+		},
+	}
+	favoriteRepo := &mockCardFavoriteRepository{
+		isFavoritedBatchFn: func(ctx context.Context, uID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]bool, error) {
+			return map[uuid.UUID]bool{cardID: true}, nil
+		},
+	}
+	ratingRepo := &mockCardRatingRepository{
+		aggregateForCardsBatchFn: func(ctx context.Context, cardIDs []uuid.UUID) (map[uuid.UUID]models.CardRatingAggregate, error) {
+			return map[uuid.UUID]models.CardRatingAggregate{cardID: {AverageStars: 4.5, RatingsCount: 2}}, nil
+		},
+		myRatingsBatchFn: func(ctx context.Context, uID uuid.UUID, cardIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+			return map[uuid.UUID]int{cardID: 5}, nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, favoriteRepo, ratingRepo, nil, nil, nil, nil, nil, nil, nil)
+
+	_, items, err := svc.ListTaskCards(context.Background(), viewerID, taskID, 1, 50)
+	if err != nil {
+		t.Fatalf("ListTaskCards() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("len(items) = %d, want 1", len(items))
+	}
+	item := items[0]
+	if item.IsFavorite == nil || !*item.IsFavorite {
+		t.Errorf("IsFavorite = %v, want true", item.IsFavorite)
+	}
+	if item.AverageStars == nil || *item.AverageStars != 4.5 {
+		t.Errorf("AverageStars = %v, want 4.5", item.AverageStars)
+	}
+	if item.RatingsCount == nil || *item.RatingsCount != 2 {
+		t.Errorf("RatingsCount = %v, want 2", item.RatingsCount)
+	}
+	if item.MyStars == nil || *item.MyStars != 5 {
+		t.Errorf("MyStars = %v, want 5", item.MyStars)
+	}
+}
+
+// ==================== Избранное ====================
+
+func TestCardService_FavoriteCard_ForbiddenForNonOwner_UserUpload(t *testing.T) {
+	owner := uuid.New()
+	taskID := uuid.New()
+	cardID := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: owner, SourceType: models.SourceUserUpload, Status: models.CardTaskDone}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Card, error) {
+			return &models.Card{ID: cardID, TaskID: taskID}, nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.FavoriteCard(context.Background(), uuid.New(), cardID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("FavoriteCard() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCardService_FavoriteCard_Success_CatalogTextbook(t *testing.T) {
+	taskID := uuid.New()
+	cardID := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: uuid.New(), SourceType: models.SourceCatalogTextbook, Status: models.CardTaskDone}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Card, error) {
+			return &models.Card{ID: cardID, TaskID: taskID}, nil
+		},
+	}
+	var addedUser, addedCard uuid.UUID
+	favoriteRepo := &mockCardFavoriteRepository{
+		addFn: func(ctx context.Context, userID, cID uuid.UUID) error {
+			addedUser, addedCard = userID, cID
+			return nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, favoriteRepo, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	viewerID := uuid.New()
+	if err := svc.FavoriteCard(context.Background(), viewerID, cardID); err != nil {
+		t.Fatalf("FavoriteCard() error = %v", err)
+	}
+	if addedUser != viewerID || addedCard != cardID {
+		t.Errorf("Add() called with (%v, %v), want (%v, %v)", addedUser, addedCard, viewerID, cardID)
+	}
+}
+
+func TestCardService_UnfavoriteCard_NotFound(t *testing.T) {
+	favoriteRepo := &mockCardFavoriteRepository{
+		removeFn: func(ctx context.Context, userID, cardID uuid.UUID) error {
+			return models.ErrCardFavoriteNotFound
+		},
+	}
+	svc := setupTestCardServiceFull(nil, nil, nil, favoriteRepo, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.UnfavoriteCard(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrCardFavoriteNotFound) {
+		t.Fatalf("UnfavoriteCard() error = %v, want ErrCardFavoriteNotFound", err)
+	}
+}
+
+// ==================== Рейтинг звёзд ====================
+
+func TestCardService_RateCardStars_ForbiddenForNonOwner_UserUpload(t *testing.T) {
+	owner := uuid.New()
+	taskID := uuid.New()
+	cardID := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: owner, SourceType: models.SourceUserUpload, Status: models.CardTaskDone}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Card, error) {
+			return &models.Card{ID: cardID, TaskID: taskID}, nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.RateCardStars(context.Background(), uuid.New(), cardID, 5)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("RateCardStars() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCardService_RateCardStars_Success(t *testing.T) {
+	taskID := uuid.New()
+	cardID := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: uuid.New(), SourceType: models.SourceCatalogTextbook, Status: models.CardTaskDone}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Card, error) {
+			return &models.Card{ID: cardID, TaskID: taskID}, nil
+		},
+	}
+	var gotStars int
+	ratingRepo := &mockCardRatingRepository{
+		upsertFn: func(ctx context.Context, userID, cID uuid.UUID, stars int) error {
+			gotStars = stars
+			return nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, nil, ratingRepo, nil, nil, nil, nil, nil, nil, nil)
+
+	if err := svc.RateCardStars(context.Background(), uuid.New(), cardID, 4); err != nil {
+		t.Fatalf("RateCardStars() error = %v", err)
+	}
+	if gotStars != 4 {
+		t.Errorf("Upsert() called with stars = %d, want 4", gotStars)
+	}
+}
+
+func TestCardService_RemoveCardRating_NotFound(t *testing.T) {
+	ratingRepo := &mockCardRatingRepository{
+		deleteFn: func(ctx context.Context, userID, cardID uuid.UUID) error {
+			return models.ErrCardRatingNotFound
+		},
+	}
+	svc := setupTestCardServiceFull(nil, nil, nil, nil, ratingRepo, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.RemoveCardRating(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrCardRatingNotFound) {
+		t.Fatalf("RemoveCardRating() error = %v, want ErrCardRatingNotFound", err)
+	}
+}
+
+// ==================== Шеринг ====================
+
+func TestCardService_ShareTask_ForbiddenForNonOwner(t *testing.T) {
 	owner := uuid.New()
 	taskRepo := &mockCardTaskRepository{
 		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
@@ -328,9 +592,146 @@ func TestCardService_GetTask_ForbiddenForNonOwner(t *testing.T) {
 	}
 	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 
-	_, err := svc.GetTask(context.Background(), uuid.New(), uuid.New())
+	_, err := svc.ShareTask(context.Background(), uuid.New(), uuid.New())
 	if !errors.Is(err, ErrForbidden) {
-		t.Fatalf("GetTask() error = %v, want ErrForbidden", err)
+		t.Fatalf("ShareTask() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCardService_ShareTask_GeneratesNewToken(t *testing.T) {
+	owner := uuid.New()
+	taskID := uuid.New()
+	var gotToken string
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: owner, Status: models.CardTaskDone}, nil
+		},
+		setShareTokenFn: func(ctx context.Context, tID uuid.UUID, token string) error {
+			gotToken = token
+			return nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	resp, err := svc.ShareTask(context.Background(), owner, taskID)
+	if err != nil {
+		t.Fatalf("ShareTask() error = %v", err)
+	}
+	if resp.ShareToken == "" || resp.ShareToken != gotToken {
+		t.Errorf("ShareTask() token = %q, SetShareToken() got %q", resp.ShareToken, gotToken)
+	}
+}
+
+func TestCardService_ShareTask_Idempotent_ReturnsExistingToken(t *testing.T) {
+	owner := uuid.New()
+	taskID := uuid.New()
+	existing := "already-shared-token"
+	setCalled := false
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, UserID: owner, Status: models.CardTaskDone, ShareToken: &existing}, nil
+		},
+		setShareTokenFn: func(ctx context.Context, tID uuid.UUID, token string) error {
+			setCalled = true
+			return nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	resp, err := svc.ShareTask(context.Background(), owner, taskID)
+	if err != nil {
+		t.Fatalf("ShareTask() error = %v", err)
+	}
+	if resp.ShareToken != existing {
+		t.Errorf("ShareTask() token = %q, want existing %q (идемпотентно)", resp.ShareToken, existing)
+	}
+	if setCalled {
+		t.Error("SetShareToken() should not be called when a token already exists")
+	}
+}
+
+func TestCardService_UnshareTask_ForbiddenForNonOwner(t *testing.T) {
+	owner := uuid.New()
+	taskRepo := &mockCardTaskRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.CardTask, error) {
+			return &models.CardTask{ID: id, UserID: owner, Status: models.CardTaskDone}, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.UnshareTask(context.Background(), uuid.New(), uuid.New())
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("UnshareTask() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCardService_GetSharedTask_NotDone_ReturnsNotFound(t *testing.T) {
+	taskRepo := &mockCardTaskRepository{
+		findByShareTokenFn: func(ctx context.Context, token string) (*models.CardTask, error) {
+			return &models.CardTask{ID: uuid.New(), Status: models.CardTaskProcessing}, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, err := svc.GetSharedTask(context.Background(), "some-token")
+	if !errors.Is(err, ErrCardTaskNotFound) {
+		t.Fatalf("GetSharedTask() error = %v, want ErrCardTaskNotFound (промежуточный статус не должен раскрываться)", err)
+	}
+}
+
+func TestCardService_GetSharedTask_Done_ReturnsCards(t *testing.T) {
+	taskID := uuid.New()
+	topic := "anatomy"
+	taskRepo := &mockCardTaskRepository{
+		findByShareTokenFn: func(ctx context.Context, token string) (*models.CardTask, error) {
+			return &models.CardTask{ID: taskID, Status: models.CardTaskDone, Topic: &topic, Difficulty: models.DifficultyMedium}, nil
+		},
+	}
+	cardRepo := &mockCardRepository{
+		listByTaskFn: func(ctx context.Context, tID uuid.UUID, page, limit int) ([]models.Card, int, error) {
+			return []models.Card{{ID: uuid.New(), TaskID: taskID, Question: "q", Answer: "a"}}, 1, nil
+		},
+	}
+	svc := setupTestCardServiceFull(taskRepo, cardRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	resp, err := svc.GetSharedTask(context.Background(), "some-token")
+	if err != nil {
+		t.Fatalf("GetSharedTask() error = %v", err)
+	}
+	if len(resp.Cards) != 1 {
+		t.Fatalf("len(resp.Cards) = %d, want 1", len(resp.Cards))
+	}
+	if resp.Topic == nil || *resp.Topic != topic {
+		t.Errorf("Topic = %v, want %q", resp.Topic, topic)
+	}
+}
+
+// ==================== Лента каталога ====================
+
+func TestCardService_ListCatalogFeed_InvalidTextbookID(t *testing.T) {
+	svc := setupTestCardService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	badID := "not-a-uuid"
+	_, _, err := svc.ListCatalogFeed(context.Background(), nil, &badID, nil, 1, 20)
+	if !errors.Is(err, ErrTextbookNotFound) {
+		t.Fatalf("ListCatalogFeed() error = %v, want ErrTextbookNotFound", err)
+	}
+}
+
+func TestCardService_ListCatalogFeed_Success(t *testing.T) {
+	taskRepo := &mockCardTaskRepository{
+		listCatalogFeedFn: func(ctx context.Context, f models.CardCatalogFeedFilter) ([]models.CardCatalogEntry, int, error) {
+			return []models.CardCatalogEntry{{TaskID: uuid.New(), TextbookTitle: "Anatomy 101"}}, 1, nil
+		},
+	}
+	svc := setupTestCardService(taskRepo, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	_, items, err := svc.ListCatalogFeed(context.Background(), nil, nil, nil, 1, 20)
+	if err != nil {
+		t.Fatalf("ListCatalogFeed() error = %v", err)
+	}
+	if len(items) != 1 || items[0].TextbookTitle != "Anatomy 101" {
+		t.Fatalf("items = %+v, want single entry Anatomy 101", items)
 	}
 }
 
@@ -503,7 +904,7 @@ func TestCardService_ProcessTask_LLMFailure_NotifiesCardTaskFailed(t *testing.T)
 		},
 	}
 	notifier := &mockPushNotifier{}
-	svc := NewCardService(taskRepo, &mockCardRepository{}, &mockCardProgressRepository{}, chunkRepo, &mockTextbookRepository{},
+	svc := NewCardService(taskRepo, &mockCardRepository{}, &mockCardProgressRepository{}, &mockCardFavoriteRepository{}, &mockCardRatingRepository{}, chunkRepo, &mockTextbookRepository{},
 		&mockUploadRepository{findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Upload, error) {
 			return &models.Upload{ID: id, UploadType: "pdf", S3Key: "uploads/pdf/x.pdf"}, nil
 		}}, &mockReportRepository{}, &mockObjectStorage{}, llmProvider, llmProvider, &mockTaskEnqueuer{}, notifier)

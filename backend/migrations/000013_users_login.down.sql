@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS login_change_requests;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS uq_users_login;
+ALTER TABLE users DROP COLUMN IF EXISTS login;

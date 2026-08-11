@@ -69,6 +69,9 @@ func MapServiceError(c *gin.Context, err error) {
 	case errors.Is(err, service.ErrTokenCompromised):
 		RespondWithError(c, http.StatusUnauthorized, "TOKEN_COMPROMISED", "token reuse detected - please login again", nil)
 
+	case errors.Is(err, service.ErrPasswordResetCodeInvalid):
+		RespondWithError(c, http.StatusBadRequest, "INVALID_CODE", "invalid or expired code", nil)
+
 	default:
 		RespondWithError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "internal server error", nil)
 	}

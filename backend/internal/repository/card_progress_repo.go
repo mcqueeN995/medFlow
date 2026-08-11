@@ -136,6 +136,58 @@ func (r *CardProgressRepo) ListDueForUser(ctx context.Context, userID uuid.UUID,
 	return out, rows.Err()
 }
 
+// ListDueFavoritesForUser - как ListDueForUser, но только по карточкам,
+// добавленным в избранное (card_favorites) - отдельная колода "хочу учить
+// эти" поверх обычного SM-2 due-списка.
+func (r *CardProgressRepo) ListDueFavoritesForUser(ctx context.Context, userID uuid.UUID, limit int) ([]models.ReviewCard, error) {
+	query := `
+		SELECT c.id, c.task_id, c.textbook_id, c.chapter, c.topic, c.subtopic, c.question, c.answer,
+			c.page_approx, c.source_reference, c.difficulty, c.report_count, c.created_at,
+			cp.id, cp.ease_factor, cp.interval_days, cp.repetitions, cp.next_review_at, cp.last_review_at, cp.last_grade, cp.created_at, cp.updated_at
+		FROM cards c
+		JOIN card_progress cp ON cp.card_id = c.id
+		JOIN card_favorites f ON f.card_id = c.id AND f.user_id = cp.user_id
+		WHERE cp.user_id = $1 AND cp.next_review_at <= now()
+		ORDER BY cp.next_review_at ASC
+		LIMIT $2`
+
+	rows, err := r.pool.Query(ctx, query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []models.ReviewCard
+	for rows.Next() {
+		var rc models.ReviewCard
+		var difficulty string
+		err := rows.Scan(
+			&rc.ID, &rc.TaskID, &rc.TextbookID, &rc.Chapter, &rc.Topic, &rc.Subtopic, &rc.Question, &rc.Answer,
+			&rc.PageApprox, &rc.SourceReference, &difficulty, &rc.ReportCount, &rc.CreatedAt,
+			&rc.Progress.ID, &rc.Progress.EaseFactor, &rc.Progress.IntervalDays, &rc.Progress.Repetitions,
+			&rc.Progress.NextReviewAt, &rc.Progress.LastReviewAt, &rc.Progress.LastGrade, &rc.Progress.CreatedAt, &rc.Progress.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		rc.Difficulty = models.CardDifficulty(difficulty)
+		rc.Progress.UserID = userID
+		rc.Progress.CardID = rc.ID
+		out = append(out, rc)
+	}
+	return out, rows.Err()
+}
+
+func (r *CardProgressRepo) CountDueFavoritesForUser(ctx context.Context, userID uuid.UUID) (int, error) {
+	var n int
+	err := r.pool.QueryRow(ctx, `
+		SELECT count(*) FROM card_progress cp
+		JOIN card_favorites f ON f.card_id = cp.card_id AND f.user_id = cp.user_id
+		WHERE cp.user_id = $1 AND cp.next_review_at <= now()
+	`, userID).Scan(&n)
+	return n, err
+}
+
 // StatsForUser считает агрегаты одним запросом: обучено (repetitions>0),
 // due today (next_review_at до конца сегодняшнего календарного дня),
 // средний ease_factor, разбивка по сложности карточки.

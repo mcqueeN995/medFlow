@@ -11,6 +11,8 @@ import type {
   Thread,
   ThreadListItem,
   UpdateThreadRequest,
+  VoteRequest,
+  VoteResult,
 } from '@/api/generated'
 import { users, userByToken, type MockUser } from './auth'
 
@@ -108,6 +110,19 @@ function reactionKey(userId: string, targetType: ReactionTargetType, targetId: s
   return `${userId}:${targetType}:${targetId}`
 }
 
+// commentId -> userId -> направление голоса. Отдельная карта от reactions -
+// голос (kind='vote' на бэкенде) сосуществует с эмодзи-реакцией на том же
+// комментарии независимо, см. миграцию 000016_reactions_kind.
+const commentVotes = new Map<string, Map<string, 'up' | 'down'>>()
+
+function voteSummary(commentId: string, viewerId?: string): { score: number; myVote?: 'up' | 'down' } {
+  const votes = commentVotes.get(commentId)
+  if (!votes) return { score: 0 }
+  let score = 0
+  for (const direction of votes.values()) score += direction === 'up' ? 1 : -1
+  return { score, myVote: viewerId ? votes.get(viewerId) : undefined }
+}
+
 function currentUser(request: Request): MockUser | undefined {
   return userByToken(request.headers.get('authorization'))
 }
@@ -162,13 +177,16 @@ function toThreadListItem(t: MockThread): ThreadListItem {
   return rest
 }
 
-function toComment(c: MockComment): Comment {
+function toComment(c: MockComment, viewerId?: string): Comment {
+  const { score, myVote } = voteSummary(c.id, viewerId)
   return {
     id: c.id,
     author: authorOf(c.authorId),
     content: c.content,
     depth: c.depth,
     likes_count: c.likes_count,
+    vote_score: score,
+    my_vote: myVote,
     deleted_at: c.deleted_at,
     created_at: c.created_at,
   }
@@ -311,26 +329,32 @@ export const forumHandlers = [
   }),
 
   http.get(`${API}/threads/:id/comments`, ({ params, request }) => {
+    const user = currentUser(request)
+    if (!user) return unauthorized()
     const thread = threads.find((t) => t.id === params.id && !t.deleted_at)
     if (!thread) return notFound('тред не найден')
 
     const url = new URL(request.url)
     const page = Number(url.searchParams.get('page') ?? '1')
     const limit = Number(url.searchParams.get('limit') ?? '50')
+    const sort = url.searchParams.get('sort') ?? 'new'
 
-    const topLevel = comments
+    let topLevel = comments
       .filter((c) => c.threadId === thread.id && c.parentId === null && !c.deleted_at)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    if (sort === 'best') {
+      topLevel = [...topLevel].sort((a, b) => voteSummary(b.id).score - voteSummary(a.id).score)
+    }
     const total = topLevel.length
     const start = (page - 1) * limit
     const pageComments = topLevel.slice(start, start + limit)
 
     const data: CommentTree[] = pageComments.map((c) => ({
-      ...toComment(c),
+      ...toComment(c, user.id),
       replies: comments
         .filter((r) => r.parentId === c.id && !r.deleted_at)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
-        .map(toComment),
+        .map((r) => toComment(r, user.id)),
     }))
 
     return HttpResponse.json({ data, pagination: { page, limit, total, has_next: start + limit < total } })
@@ -435,6 +459,40 @@ export const forumHandlers = [
     reactions.delete(key)
     comment.likes_count = Math.max(0, comment.likes_count - 1)
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.post(`${API}/comments/:id/vote`, async ({ params, request }) => {
+    const user = currentUser(request)
+    if (!user) return unauthorized()
+    const comment = comments.find((c) => c.id === params.id && !c.deleted_at)
+    if (!comment) return notFound('комментарий не найден')
+
+    const { direction } = (await request.json()) as VoteRequest
+    let votes = commentVotes.get(comment.id)
+    if (!votes) {
+      votes = new Map()
+      commentVotes.set(comment.id, votes)
+    }
+    votes.set(user.id!, direction as 'up' | 'down')
+
+    const { score, myVote } = voteSummary(comment.id, user.id)
+    const result: VoteResult = { score, my_vote: myVote }
+    return HttpResponse.json(result)
+  }),
+
+  http.delete(`${API}/comments/:id/vote`, ({ params, request }) => {
+    const user = currentUser(request)
+    if (!user) return unauthorized()
+    const comment = comments.find((c) => c.id === params.id && !c.deleted_at)
+    if (!comment) return notFound('комментарий не найден')
+
+    const votes = commentVotes.get(comment.id)
+    if (!votes?.has(user.id!)) return notFound('голос не найден')
+    votes.delete(user.id!)
+
+    const { score, myVote } = voteSummary(comment.id, user.id)
+    const result: VoteResult = { score, my_vote: myVote }
+    return HttpResponse.json(result)
   }),
 
   http.post(`${API}/comments/:id/report`, async ({ params, request }) => {

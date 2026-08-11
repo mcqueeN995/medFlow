@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Bell, GraduationCap, LogOut, Mail, Trash2 } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Bell, GraduationCap, KeyRound, LogOut, Mail, Star, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { deleteUsersMe, getUsersMe, patchPushPreferences, patchUsersMe } from '@/api/generated/medFlowAPI'
+import {
+  deleteUsersMe,
+  getUsersMe,
+  patchPushPreferences,
+  patchUsersMe,
+  postUsersMeLoginChange,
+  postUsersMeLoginChangeConfirm,
+} from '@/api/generated/medFlowAPI'
 import { University, UserRole } from '@/api/generated'
 import type { PushPreferences, UserProfile } from '@/api/generated'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +60,13 @@ export function ProfilePage() {
   const [course, setCourse] = useState('')
   const [faculty, setFaculty] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const [changingLogin, setChangingLogin] = useState(false)
+  const [newLogin, setNewLogin] = useState('')
+  const [loginChangePassword, setLoginChangePassword] = useState('')
+  const [loginChangeCode, setLoginChangeCode] = useState('')
+  const [codeSent, setCodeSent] = useState(false)
+  const [loginChangeSubmitting, setLoginChangeSubmitting] = useState(false)
 
   const [deleting, setDeleting] = useState(false)
   const [deletePassword, setDeletePassword] = useState('')
@@ -139,6 +153,47 @@ export function ProfilePage() {
     }
   }
 
+  async function onRequestLoginChange(e: React.FormEvent) {
+    e.preventDefault()
+    if (newLogin.trim().length < 3) {
+      toast.error('Логин — минимум 3 символа')
+      return
+    }
+    setLoginChangeSubmitting(true)
+    try {
+      await postUsersMeLoginChange({ new_login: newLogin.trim(), current_password: loginChangePassword })
+      setCodeSent(true)
+      toast.success('Код подтверждения отправлен на почту')
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 409) toast.error('Такой логин уже занят')
+      else if (status === 401) toast.error('Неверный пароль')
+      else toast.error('Не удалось запросить смену логина')
+    } finally {
+      setLoginChangeSubmitting(false)
+    }
+  }
+
+  async function onConfirmLoginChange(e: React.FormEvent) {
+    e.preventDefault()
+    setLoginChangeSubmitting(true)
+    try {
+      const updated = await postUsersMeLoginChangeConfirm({ code: loginChangeCode })
+      setProfile(updated)
+      setUser(updated)
+      toast.success('Логин изменён')
+      setChangingLogin(false)
+      setCodeSent(false)
+      setNewLogin('')
+      setLoginChangePassword('')
+      setLoginChangeCode('')
+    } catch {
+      toast.error('Неверный или истёкший код')
+    } finally {
+      setLoginChangeSubmitting(false)
+    }
+  }
+
   async function onConfirmDelete() {
     if (!deletePassword) {
       toast.error('Введите пароль для подтверждения')
@@ -188,6 +243,9 @@ export function ProfilePage() {
           <h1 className="text-2xl font-bold text-primary">Профиль</h1>
           <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
             <Mail className="size-3.5" /> {profile.email}
+          </p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <KeyRound className="size-3.5" /> Логин: {profile.login}
           </p>
         </div>
         <Badge variant={profile.role === UserRole.admin ? 'default' : 'secondary'}>{ROLE_LABELS[profile.role!]}</Badge>
@@ -262,6 +320,10 @@ export function ProfilePage() {
         <LogOut className="size-4" /> Выйти
       </Button>
 
+      <Link to="/profile/rated-cards" className="flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <Star className="size-4" /> Оценённые карточки
+      </Link>
+
       <div className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -293,6 +355,91 @@ export function ProfilePage() {
               </label>
             ))}
           </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-5">
+        <div className="flex items-center gap-2">
+          <KeyRound className="size-4 text-muted-foreground" />
+          <h2 className="font-semibold text-foreground">Смена логина</h2>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Логин отдельный от никнейма и используется для входа. Смена требует подтверждения кодом на {profile.email}.
+        </p>
+
+        {changingLogin ? (
+          codeSent ? (
+            <form onSubmit={onConfirmLoginChange} className="flex flex-col gap-2">
+              <Label htmlFor="login-change-code">Код из письма</Label>
+              <Input
+                id="login-change-code"
+                value={loginChangeCode}
+                onChange={(e) => setLoginChangeCode(e.target.value)}
+                className="h-10 rounded-xl"
+                required
+              />
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" className="h-9 rounded-full" disabled={loginChangeSubmitting}>
+                  {loginChangeSubmitting ? 'Подтверждаем…' : 'Подтвердить'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 rounded-full"
+                  onClick={() => {
+                    setChangingLogin(false)
+                    setCodeSent(false)
+                    setNewLogin('')
+                    setLoginChangePassword('')
+                    setLoginChangeCode('')
+                  }}
+                >
+                  Отмена
+                </Button>
+              </div>
+            </form>
+          ) : (
+            <form onSubmit={onRequestLoginChange} className="flex flex-col gap-2">
+              <Label htmlFor="new-login">Новый логин</Label>
+              <Input
+                id="new-login"
+                value={newLogin}
+                onChange={(e) => setNewLogin(e.target.value)}
+                className="h-10 rounded-xl"
+                minLength={3}
+                maxLength={50}
+                required
+              />
+              <Label htmlFor="login-change-password">Текущий пароль</Label>
+              <Input
+                id="login-change-password"
+                type="password"
+                value={loginChangePassword}
+                onChange={(e) => setLoginChangePassword(e.target.value)}
+                className="h-10 rounded-xl"
+                required
+              />
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" className="h-9 rounded-full" disabled={loginChangeSubmitting}>
+                  {loginChangeSubmitting ? 'Отправляем…' : 'Отправить код'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 rounded-full"
+                  onClick={() => setChangingLogin(false)}
+                >
+                  Отмена
+                </Button>
+              </div>
+            </form>
+          )
+        ) : (
+          <Button variant="outline" size="sm" className="h-9 w-fit rounded-full" onClick={() => setChangingLogin(true)}>
+            Изменить логин
+          </Button>
         )}
       </div>
 

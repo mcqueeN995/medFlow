@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, CheckCircle2, PartyPopper, ShieldAlert } from 'lucide-react'
 import { toast } from 'sonner'
-import { getCardsReview, postCardsIdRate } from '@/api/generated/medFlowAPI'
+import { getCardsFavoritesReview, getCardsReview, postCardsIdRate } from '@/api/generated/medFlowAPI'
 import type { ReviewCard } from '@/api/generated'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -18,6 +18,8 @@ const GRADE_STYLES: Record<number, string> = {
 }
 
 export function ReviewPage() {
+  const [searchParams] = useSearchParams()
+  const favoritesOnly = searchParams.get('scope') === 'favorites'
   const [batch, setBatch] = useState<ReviewCard[] | null>(null)
   const [index, setIndex] = useState(0)
   const [revealed, setRevealed] = useState(false)
@@ -25,8 +27,10 @@ export function ReviewPage() {
   const [reviewedCount, setReviewedCount] = useState(0)
 
   useEffect(() => {
-    getCardsReview({ limit: 20 }).then((res) => setBatch(res.data ?? []))
-  }, [])
+    const fetchBatch = favoritesOnly ? getCardsFavoritesReview({ limit: 20 }) : getCardsReview({ limit: 20 })
+    fetchBatch.then((res) => setBatch(res.data ?? []))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favoritesOnly])
 
   async function grade(value: number) {
     const card = batch?.[index]

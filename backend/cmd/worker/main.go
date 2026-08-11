@@ -60,9 +60,11 @@ func main() {
 	pushService := service.NewPushService(pushRepo, service.NewWebPushSender(), cfg.VAPID)
 
 	// enqueuer воркеру не нужен (он только выполняет задачи, не создаёт новые) -
-	// nil безопасен, т.к. CardService.ProcessTask его не использует.
+	// nil безопасен, т.к. CardService.ProcessTask его не использует. По той же
+	// причине favoriteRepo/ratingRepo тоже nil - ProcessTask их не трогает
+	// (избранное/рейтинг ставятся из HTTP-хендлеров, не из конвейера генерации).
 	cardService := service.NewCardService(
-		cardTaskRepo, cardRepo, cardProgressRepo, textbookChunkRepo, textbookRepo, uploadRepo, reportRepo,
+		cardTaskRepo, cardRepo, cardProgressRepo, nil, nil, textbookChunkRepo, textbookRepo, uploadRepo, reportRepo,
 		s3Client, llmProvider, embedProvider, nil, pushService,
 	)
 	cardTaskHandler := worker.NewCardTaskHandler(cardService)
