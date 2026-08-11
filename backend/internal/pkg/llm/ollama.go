@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 )
 
 // OllamaProvider — локальный LLM-бэкенд через нативный API Ollama.
@@ -19,12 +20,19 @@ type OllamaProvider struct {
 	httpClient      *http.Client
 }
 
+// ollamaHTTPTimeout — таймаут отдельный от defaultHTTPTimeout: облачные API
+// отвечают за секунды, а локальная генерация 7B-моделью без GPU (dev-Mac
+// без видеокарты) на полный промпт с карточками может занимать несколько
+// минут - 60s (общий таймаут для облака) там регулярно ловит "context
+// deadline exceeded" ещё до того, как модель успела ответить.
+const ollamaHTTPTimeout = 5 * time.Minute
+
 func NewOllamaProvider(host, generationModel, embeddingModel string) *OllamaProvider {
 	return &OllamaProvider{
 		host:            host,
 		generationModel: generationModel,
 		embeddingModel:  embeddingModel,
-		httpClient:      &http.Client{Timeout: defaultHTTPTimeout},
+		httpClient:      &http.Client{Timeout: ollamaHTTPTimeout},
 	}
 }
 
