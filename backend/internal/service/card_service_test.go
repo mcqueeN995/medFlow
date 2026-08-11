@@ -975,6 +975,34 @@ func TestCardService_ProcessTask_UserUpload_ParsesAndEmbedsPDF(t *testing.T) {
 
 func intPtr(n int) *int { return &n }
 
+func TestNonZeroIntPtr(t *testing.T) {
+	cases := []struct {
+		name string
+		n    int
+		want *int
+	}{
+		{"zero is unknown", 0, nil},
+		{"negative is unknown", -5, nil},
+		{"plausible page number", 42, intPtr(42)},
+		{"boundary is kept", maxPlausiblePage, intPtr(maxPlausiblePage)},
+		// Локальные LLM иногда галлюцинируют огромные значения page_approx,
+		// которые переполнили бы Postgres int4 при записи в БД (см.
+		// maxPlausiblePage) - такие должны стать nil, а не упасть на INSERT.
+		{"hallucinated huge value is unknown", 52977624159504, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nonZeroIntPtr(tc.n)
+			if (got == nil) != (tc.want == nil) {
+				t.Fatalf("nonZeroIntPtr(%d) = %v, want %v", tc.n, got, tc.want)
+			}
+			if got != nil && *got != *tc.want {
+				t.Fatalf("nonZeroIntPtr(%d) = %d, want %d", tc.n, *got, *tc.want)
+			}
+		})
+	}
+}
+
 // buildMinimalPDF - минимальный однострочный PDF с текстом, для проверки
 // ensureChunks (Get -> ExtractPages -> Split -> Embed -> CreateBatch).
 func buildMinimalPDF(t *testing.T, text string) []byte {

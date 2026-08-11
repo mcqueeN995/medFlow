@@ -905,8 +905,15 @@ func nonEmptyPtr(s string) *string {
 	return &s
 }
 
+// maxPlausiblePage - разумный потолок для "номера страницы" из ответа LLM.
+// Локальные модели (в отличие от облачных) иногда галлюцинируют огромные
+// или отрицательные значения в page_approx, которые не влезают в Postgres
+// int4 (max ~2.1 млрд) и валят весь INSERT карточек - такие тоже трактуем
+// как "не знаю", а не падаем на записи в БД.
+const maxPlausiblePage = 100_000
+
 func nonZeroIntPtr(n int) *int {
-	if n == 0 {
+	if n <= 0 || n > maxPlausiblePage {
 		return nil
 	}
 	return &n
