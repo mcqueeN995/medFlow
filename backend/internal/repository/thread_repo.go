@@ -158,6 +158,11 @@ func (r *ThreadRepo) List(ctx context.Context, f models.ThreadListFilter) ([]mod
 		args = append(args, *f.AuthorID)
 		argN++
 	}
+	if f.Q != nil && *f.Q != "" {
+		where += fmt.Sprintf(" AND (t.title ILIKE $%d OR t.content ILIKE $%d)", argN, argN)
+		args = append(args, "%"+*f.Q+"%")
+		argN++
+	}
 
 	var total int
 	countQuery := "SELECT count(*) FROM threads t WHERE " + where

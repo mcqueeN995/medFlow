@@ -19,7 +19,7 @@ func NewCommentRepo(pool *pgxpool.Pool) *CommentRepo {
 }
 
 const commentSelectColumns = `
-	c.id, c.thread_id, c.parent_id, c.content, c.depth, c.likes_count,
+	c.id, c.thread_id, c.parent_id, c.reply_to_id, c.content, c.depth, c.likes_count,
 	c.hidden_at, c.hidden_by, c.hidden_reason, c.deleted_at, c.created_at, c.updated_at,
 	u.id, u.nickname, u.university, u.course, u.faculty, u.created_at,
 	(SELECT count(*) FROM threads t2 WHERE t2.author_id = u.id AND t2.deleted_at IS NULL)
@@ -28,7 +28,7 @@ const commentSelectColumns = `
 func (r *CommentRepo) scanComment(row pgx.Row) (*models.Comment, error) {
 	var c models.Comment
 	err := row.Scan(
-		&c.ID, &c.ThreadID, &c.ParentID, &c.Content, &c.Depth, &c.LikesCount,
+		&c.ID, &c.ThreadID, &c.ParentID, &c.ReplyToID, &c.Content, &c.Depth, &c.LikesCount,
 		&c.HiddenAt, &c.HiddenBy, &c.HiddenReason, &c.DeletedAt, &c.CreatedAt, &c.UpdatedAt,
 		&c.Author.ID, &c.Author.Nickname, &c.Author.University, &c.Author.Course, &c.Author.Faculty, &c.Author.CreatedAt,
 		&c.Author.ThreadsCount,
@@ -41,7 +41,9 @@ func (r *CommentRepo) scanComment(row pgx.Row) (*models.Comment, error) {
 
 // Create вставляет комментарий и одновременно инкрементирует threads.comments_count
 // в одной транзакции - счётчик обязан оставаться согласованным со строками comments.
-func (r *CommentRepo) Create(ctx context.Context, threadID, authorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+// replyToID - см. models.Comment.ReplyToID, отличается от parentID, когда
+// ответ на ответ схлопывается к родителю верхнего уровня.
+func (r *CommentRepo) Create(ctx context.Context, threadID, authorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -50,10 +52,10 @@ func (r *CommentRepo) Create(ctx context.Context, threadID, authorID uuid.UUID, 
 
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `
-		INSERT INTO comments (thread_id, parent_id, author_id, content, depth)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO comments (thread_id, parent_id, reply_to_id, author_id, content, depth)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id
-	`, threadID, parentID, authorID, content, depth).Scan(&id)
+	`, threadID, parentID, replyToID, authorID, content, depth).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
@@ -104,31 +106,28 @@ func (r *CommentRepo) Hide(ctx context.Context, id, hiddenBy uuid.UUID, reason s
 	return r.FindByID(ctx, id)
 }
 
-func (r *CommentRepo) SoftDelete(ctx context.Context, id, threadID uuid.UUID) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	cmd, err := tx.Exec(ctx, `UPDATE comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
+// SoftDelete помечает комментарий удалённым, оставляя строку на месте -
+// комментарий продолжает показываться в дереве плашкой-заглушкой (см.
+// ForumService.mapCommentToDTO/фронтенд), а не пропадает вместе со своими
+// ответами. threads.comments_count поэтому не трогаем: слот в треде
+// по-прежнему занят, просто содержимое скрыто.
+func (r *CommentRepo) SoftDelete(ctx context.Context, id uuid.UUID) error {
+	cmd, err := r.pool.Exec(ctx, `UPDATE comments SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, id)
 	if err != nil {
 		return err
 	}
 	if cmd.RowsAffected() == 0 {
 		return models.ErrCommentNotFound
 	}
-
-	if _, err := tx.Exec(ctx, `UPDATE threads SET comments_count = GREATEST(comments_count - 1, 0) WHERE id = $1`, threadID); err != nil {
-		return err
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 // ListByThread возвращает страницу комментариев верхнего уровня (depth=0) вместе
 // со всеми их прямыми ответами (depth=1) - дерево ограничено двумя уровнями, см.
 // UpdateComment/ForumService.CreateComment, где реплаи на реплаи "схлопываются".
+// Удалённые/скрытые комментарии намеренно НЕ исключаются из выборки - иначе
+// их ответы осиротели бы визуально; ForumService/фронтенд рендерят такие
+// строки плашкой-заглушкой вместо содержимого (см. dto.ToComment).
 // sort="best" сортирует верхний уровень по сумме голосов (см. миграцию
 // 000016_reactions_kind) - коррелированным подзапросом прямо в ORDER BY,
 // чтобы LIMIT/OFFSET пагинация была консистентна с сортировкой (агрегация
@@ -138,7 +137,7 @@ func (r *CommentRepo) SoftDelete(ctx context.Context, id, threadID uuid.UUID) er
 // на реплаи.
 func (r *CommentRepo) ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error) {
 	var total int
-	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM comments WHERE thread_id = $1 AND parent_id IS NULL AND deleted_at IS NULL`, threadID).Scan(&total); err != nil {
+	if err := r.pool.QueryRow(ctx, `SELECT count(*) FROM comments WHERE thread_id = $1 AND parent_id IS NULL`, threadID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
@@ -151,7 +150,7 @@ func (r *CommentRepo) ListByThread(ctx context.Context, threadID uuid.UUID, page
 	}
 
 	topQuery := `SELECT ` + commentSelectColumns + ` FROM comments c JOIN users u ON u.id = c.author_id
-		WHERE c.thread_id = $1 AND c.parent_id IS NULL AND c.deleted_at IS NULL
+		WHERE c.thread_id = $1 AND c.parent_id IS NULL
 		ORDER BY ` + orderBy + ` LIMIT $2 OFFSET $3`
 	rows, err := r.pool.Query(ctx, topQuery, threadID, limit, (page-1)*limit)
 	if err != nil {
@@ -179,7 +178,7 @@ func (r *CommentRepo) ListByThread(ctx context.Context, threadID uuid.UUID, page
 	}
 
 	replyQuery := `SELECT ` + commentSelectColumns + ` FROM comments c JOIN users u ON u.id = c.author_id
-		WHERE c.parent_id = ANY($1) AND c.deleted_at IS NULL
+		WHERE c.parent_id = ANY($1)
 		ORDER BY c.created_at ASC`
 	replyRows, err := r.pool.Query(ctx, replyQuery, topIDs)
 	if err != nil {

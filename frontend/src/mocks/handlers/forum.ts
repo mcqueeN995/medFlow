@@ -35,11 +35,15 @@ interface MockComment {
   id: string
   threadId: string
   parentId: string | null
+  // replyToId - кому реально отвечали, если это не тот же комментарий, что и
+  // parentId (после схлопывания дерева до 2 уровней) - см. forum_service.go.
+  replyToId: string | null
   authorId: string
   content: string
   depth: number
   likes_count: number
   deleted_at: string | null
+  hidden_at: string | null
   created_at: string
 }
 
@@ -80,22 +84,26 @@ const comments: MockComment[] = [
     id: 'comment-1',
     threadId: 'thread-1',
     parentId: null,
+    replyToId: null,
     authorId: '22222222-2222-2222-2222-222222222222',
     content: 'Я готовился по атласу + Пирогов.онлайн, устно обычно спрашивают топографию черепных нервов.',
     depth: 0,
     likes_count: 3,
     deleted_at: null,
+    hidden_at: null,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
   },
   {
     id: 'comment-2',
     threadId: 'thread-1',
     parentId: 'comment-1',
+    replyToId: null,
     authorId: '11111111-1111-1111-1111-111111111111',
     content: 'Спасибо! А препараты по остеологии показывали живьём или только на муляжах?',
     depth: 1,
     likes_count: 0,
     deleted_at: null,
+    hidden_at: null,
     created_at: new Date(Date.now() - 1000 * 60 * 60 * 18).toISOString(),
   },
 ]
@@ -177,17 +185,23 @@ function toThreadListItem(t: MockThread): ThreadListItem {
   return rest
 }
 
+// toComment - content уходит пустым для удалённых/скрытых комментариев,
+// плашку-заглушку рендерит фронтенд по deleted_at/hidden_at (см.
+// dto.ToComment на бэкенде - тот же принцип: реальный текст наружу не идёт).
 function toComment(c: MockComment, viewerId?: string): Comment {
   const { score, myVote } = voteSummary(c.id, viewerId)
+  const isRemoved = Boolean(c.deleted_at || c.hidden_at)
   return {
     id: c.id,
     author: authorOf(c.authorId),
-    content: c.content,
+    content: isRemoved ? '' : c.content,
     depth: c.depth,
+    reply_to_id: c.replyToId,
     likes_count: c.likes_count,
     vote_score: score,
     my_vote: myVote,
     deleted_at: c.deleted_at,
+    hidden_at: c.hidden_at,
     created_at: c.created_at,
   }
 }
@@ -197,6 +211,7 @@ export const forumHandlers = [
     const url = new URL(request.url)
     const tag = url.searchParams.get('tag')
     const authorId = url.searchParams.get('author_id')
+    const q = url.searchParams.get('q')?.toLowerCase()
     const sort = url.searchParams.get('sort') ?? 'created_at_desc'
     const page = Number(url.searchParams.get('page') ?? '1')
     const limit = Number(url.searchParams.get('limit') ?? '20')
@@ -204,6 +219,7 @@ export const forumHandlers = [
     let filtered = threads.filter((t) => !t.deleted_at)
     if (tag) filtered = filtered.filter((t) => t.tags.includes(tag as ThreadTag))
     if (authorId) filtered = filtered.filter((t) => t.authorId === authorId)
+    if (q) filtered = filtered.filter((t) => t.title.toLowerCase().includes(q) || t.content.toLowerCase().includes(q))
 
     filtered = [...filtered].sort((a, b) =>
       sort === 'popular'
@@ -339,8 +355,11 @@ export const forumHandlers = [
     const limit = Number(url.searchParams.get('limit') ?? '50')
     const sort = url.searchParams.get('sort') ?? 'new'
 
+    // Удалённые/скрытые комментарии намеренно остаются в выборке - иначе их
+    // ответы осиротели бы визуально при исчезновении родителя (см. ту же
+    // логику в CommentRepo.ListByThread на бэкенде).
     let topLevel = comments
-      .filter((c) => c.threadId === thread.id && c.parentId === null && !c.deleted_at)
+      .filter((c) => c.threadId === thread.id && c.parentId === null)
       .sort((a, b) => a.created_at.localeCompare(b.created_at))
     if (sort === 'best') {
       topLevel = [...topLevel].sort((a, b) => voteSummary(b.id).score - voteSummary(a.id).score)
@@ -352,7 +371,7 @@ export const forumHandlers = [
     const data: CommentTree[] = pageComments.map((c) => ({
       ...toComment(c, user.id),
       replies: comments
-        .filter((r) => r.parentId === c.id && !r.deleted_at)
+        .filter((r) => r.parentId === c.id)
         .sort((a, b) => a.created_at.localeCompare(b.created_at))
         .map((r) => toComment(r, user.id)),
     }))
@@ -369,6 +388,7 @@ export const forumHandlers = [
     const body = (await request.json()) as CreateCommentRequest
 
     let parentId: string | null = null
+    let replyToId: string | null = null
     let depth = 0
     if (body.parent_id) {
       const parent = comments.find((c) => c.id === body.parent_id && c.threadId === thread.id && !c.deleted_at)
@@ -380,7 +400,14 @@ export const forumHandlers = [
       }
       // дерево ограничено 2 уровнями - ответ на ответ "схлопывается" к
       // родителю верхнего уровня, см. такую же логику в forum_service.go.
-      parentId = parent.depth === 0 ? parent.id : parent.parentId
+      // replyToId сохраняет исходного адресата, когда он отличается от
+      // схлопнутого parentId - иначе теряется, кому реально отвечали.
+      if (parent.depth === 0) {
+        parentId = parent.id
+      } else {
+        parentId = parent.parentId
+        replyToId = parent.id
+      }
       depth = 1
     }
 
@@ -389,11 +416,13 @@ export const forumHandlers = [
       id: `comment-${commentCounter}`,
       threadId: thread.id,
       parentId,
+      replyToId,
       authorId: user.id!,
       content: body.content,
       depth,
       likes_count: 0,
       deleted_at: null,
+      hidden_at: null,
       created_at: new Date().toISOString(),
     }
     comments.push(comment)
@@ -421,9 +450,9 @@ export const forumHandlers = [
     if (!comment) return notFound('комментарий не найден')
     if (comment.authorId !== user.id) return forbidden()
 
+    // comments_count не трогаем - комментарий остаётся плашкой-заглушкой в
+    // дереве, слот никуда не девается (см. CommentRepo.SoftDelete на бэкенде).
     comment.deleted_at = new Date().toISOString()
-    const thread = threads.find((t) => t.id === comment.threadId)
-    if (thread) thread.comments_count = Math.max(0, thread.comments_count - 1)
     return new HttpResponse(null, { status: 204 })
   }),
 

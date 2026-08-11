@@ -140,10 +140,10 @@ type ThreadRepository interface {
 }
 
 type CommentRepository interface {
-	Create(ctx context.Context, threadID, authorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error)
+	Create(ctx context.Context, threadID, authorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error)
 	FindByID(ctx context.Context, id uuid.UUID) (*models.Comment, error)
 	Update(ctx context.Context, id uuid.UUID, content string) (*models.Comment, error)
-	SoftDelete(ctx context.Context, id, threadID uuid.UUID) error
+	SoftDelete(ctx context.Context, id uuid.UUID) error
 	ListByThread(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error)
 	Hide(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error)
 }

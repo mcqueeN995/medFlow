@@ -21,8 +21,14 @@ import type { PublicUser } from './publicUser';
 export interface Comment {
   id?: string;
   author?: PublicUser;
+  /** Пустая строка, если комментарий удалён или скрыт - см. hidden_at/deleted_at */
   content?: string;
   depth?: number;
+  /**
+     * Кому реально отвечали, если это не тот же комментарий, что и родитель верхнего уровня (после схлопывания 2-уровневого дерева)
+     * @nullable
+     */
+  reply_to_id?: string | null;
   likes_count?: number;
   /** Сумма голосов up(+1)/down(-1) */
   vote_score?: number;

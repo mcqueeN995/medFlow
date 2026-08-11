@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import { getThreads } from '@/api/generated/medFlowAPI'
 import { GetThreadsSort, ThreadTag } from '@/api/generated'
 import type { ThreadListItem } from '@/api/generated'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -22,6 +23,7 @@ const SORT_LABELS: Record<string, string> = {
 export function ForumFeedPage() {
   const [tag, setTag] = useState<string>(ALL)
   const [sort, setSort] = useState<string>(GetThreadsSort.created_at_desc)
+  const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
 
   const [items, setItems] = useState<ThreadListItem[]>([])
@@ -29,28 +31,33 @@ export function ForumFeedPage() {
   const [hasNext, setHasNext] = useState(false)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => setPage(1), [tag, sort])
+  useEffect(() => setPage(1), [tag, sort, q])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    getThreads({
-      tag: tag === ALL ? undefined : (tag as ThreadTag),
-      sort: sort as GetThreadsSort,
-      page,
-      limit: PAGE_SIZE,
-    })
-      .then((res) => {
-        if (cancelled) return
-        setItems(res.data ?? [])
-        setTotal(res.pagination?.total ?? 0)
-        setHasNext(res.pagination?.has_next ?? false)
+    // Небольшой дебаунс на ввод поиска, чтобы не слать запрос на каждый символ.
+    const handle = setTimeout(() => {
+      getThreads({
+        tag: tag === ALL ? undefined : (tag as ThreadTag),
+        q: q.trim() || undefined,
+        sort: sort as GetThreadsSort,
+        page,
+        limit: PAGE_SIZE,
       })
-      .finally(() => !cancelled && setLoading(false))
+        .then((res) => {
+          if (cancelled) return
+          setItems(res.data ?? [])
+          setTotal(res.pagination?.total ?? 0)
+          setHasNext(res.pagination?.has_next ?? false)
+        })
+        .finally(() => !cancelled && setLoading(false))
+    }, 250)
     return () => {
       cancelled = true
+      clearTimeout(handle)
     }
-  }, [tag, sort, page])
+  }, [tag, sort, q, page])
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -62,6 +69,16 @@ export function ForumFeedPage() {
         <Link to="/forum/create" className={cn(buttonVariants(), 'h-10 rounded-full bg-linear-to-r from-primary to-accent px-4 text-primary-foreground')}>
           <Plus className="size-4" /> Новый тред
         </Link>
+      </div>
+
+      <div className="relative">
+        <Search className="absolute left-4 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Поиск по обсуждениям…"
+          className="h-11 rounded-full pl-10"
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -108,8 +125,10 @@ export function ForumFeedPage() {
         </div>
       ) : items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-border py-16 text-center">
-          <p className="font-medium text-foreground">Пока пусто</p>
-          <p className="text-sm text-muted-foreground">Будьте первым, кто создаст тред</p>
+          <p className="font-medium text-foreground">{q ? 'Ничего не найдено' : 'Пока пусто'}</p>
+          <p className="text-sm text-muted-foreground">
+            {q ? 'Попробуйте другой запрос' : 'Будьте первым, кто создаст тред'}
+          </p>
         </div>
       ) : (
         <>

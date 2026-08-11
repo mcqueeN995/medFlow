@@ -158,7 +158,7 @@ func (s *ForumService) CreateComment(ctx context.Context, threadID, authorID uui
 		return nil, s.mapThreadErr(err)
 	}
 
-	var parentID *uuid.UUID
+	var parentID, replyToID *uuid.UUID
 	var parent *models.Comment
 	depth := 0
 	if req.ParentID != nil && *req.ParentID != "" {
@@ -172,16 +172,20 @@ func (s *ForumService) CreateComment(ctx context.Context, threadID, authorID uui
 		}
 
 		// дерево ограничено 2 уровнями: ответ на ответ схлопывается к
-		// родителю верхнего уровня, а не создаёт depth=2.
+		// родителю верхнего уровня, а не создаёт depth=2. replyToID
+		// сохраняет исходного адресата (parent.ID), когда он отличается от
+		// схлопнутого parentID - иначе на фронтенде было бы не различить
+		// "ответ в корень" от "ответ конкретному человеку" (см. models.Comment.ReplyToID).
 		if parent.Depth == 0 {
 			parentID = &parent.ID
 		} else {
 			parentID = parent.ParentID
+			replyToID = &parent.ID
 		}
 		depth = 1
 	}
 
-	comment, err := s.commentRepo.Create(ctx, threadID, authorID, parentID, depth, req.Content)
+	comment, err := s.commentRepo.Create(ctx, threadID, authorID, parentID, replyToID, depth, req.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +310,7 @@ func (s *ForumService) DeleteComment(ctx context.Context, id, userID uuid.UUID) 
 	if comment.Author.ID != userID {
 		return ErrForbidden
 	}
-	return s.mapCommentErr(s.commentRepo.SoftDelete(ctx, id, comment.ThreadID))
+	return s.mapCommentErr(s.commentRepo.SoftDelete(ctx, id))
 }
 
 // ==================== ADMIN (moderator+/admin) ====================
@@ -341,13 +345,15 @@ func (s *ForumService) AdminDeleteThread(ctx context.Context, actorID, id uuid.U
 	return nil
 }
 
+// AdminDeleteComment - в отличие от DeleteComment (самоудаление автора,
+// см. models.Comment.DeletedAt), проведено через Hide, а не SoftDelete: с
+// точки зрения читателя это тоже "удалено модератором" плашка (см.
+// dto.ToComment), просто отдельное аудит-действие (AuditCommentDelete, не
+// AuditCommentHide) и без ownership-проверки.
 func (s *ForumService) AdminDeleteComment(ctx context.Context, actorID, id uuid.UUID) error {
-	comment, err := s.commentRepo.FindByID(ctx, id)
-	if err != nil {
+	const reason = "Удалено администратором"
+	if _, err := s.commentRepo.Hide(ctx, id, actorID, reason); err != nil {
 		return s.mapCommentErr(err)
-	}
-	if err := s.mapCommentErr(s.commentRepo.SoftDelete(ctx, id, comment.ThreadID)); err != nil {
-		return err
 	}
 	s.writeAudit(ctx, actorID, models.AuditCommentDelete, "comment", id, nil)
 	return nil

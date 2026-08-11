@@ -75,9 +75,14 @@ type Thread struct {
 }
 
 type Comment struct {
-	ID           uuid.UUID
-	ThreadID     uuid.UUID
-	ParentID     *uuid.UUID
+	ID       uuid.UUID
+	ThreadID uuid.UUID
+	ParentID *uuid.UUID
+	// ReplyToID - конкретный комментарий, которому реально отвечали, если он
+	// отличается от ParentID (см. ForumService.CreateComment: дерево
+	// ограничено 2 уровнями, ответ на ответ схлопывается к ParentID
+	// верхнего уровня, а ReplyToID сохраняет исходный адресат).
+	ReplyToID    *uuid.UUID
 	Author       PublicUser
 	Content      string
 	Depth        int
@@ -113,9 +118,11 @@ type VoteSummary struct {
 type ThreadListFilter struct {
 	Tag      *ThreadTag
 	AuthorID *uuid.UUID
-	Sort     string
-	Page     int
-	Limit    int
+	// Q - поиск по заголовку/содержимому треда (ILIKE '%q%').
+	Q     *string
+	Sort  string
+	Page  int
+	Limit int
 }
 
 type Report struct {

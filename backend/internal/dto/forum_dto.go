@@ -121,10 +121,15 @@ type UpdateThreadRequest struct {
 }
 
 type Comment struct {
-	ID         string     `json:"id"`
-	Author     PublicUser `json:"author"`
-	Content    string     `json:"content"`
-	Depth      int        `json:"depth"`
+	ID      string     `json:"id"`
+	Author  PublicUser `json:"author"`
+	Content string     `json:"content"`
+	Depth   int        `json:"depth"`
+	// ReplyToID - см. models.Comment.ReplyToID: конкретный комментарий,
+	// которому отвечали, когда это не тот же комментарий, что и родитель
+	// верхнего уровня (после схлопывания 2-уровневого дерева). Фронтенд
+	// резолвит автора из уже загруженного списка реплаев того же родителя.
+	ReplyToID  *string    `json:"reply_to_id,omitempty"`
 	LikesCount int        `json:"likes_count"`
 	VoteScore  int        `json:"vote_score"`
 	MyVote     *string    `json:"my_vote,omitempty"`
@@ -135,14 +140,27 @@ type Comment struct {
 
 // ToComment - summaries может быть nil (напр. только что созданный/изменённый
 // комментарий заведомо без голосов): чтение из nil-карты в Go безопасно и
-// возвращает нулевой models.VoteSummary{}.
+// возвращает нулевой models.VoteSummary{}. Content редактируется в пустую
+// строку для удалённых/скрытых комментариев - плашку-заглушку ("удалил сам"/
+// "скрыто модератором") рендерит фронтенд по HiddenAt/DeletedAt, реальный
+// текст наружу не уходит вообще (не полагаемся на то, что клиент его спрячет).
 func ToComment(c *models.Comment, summaries map[uuid.UUID]models.VoteSummary) Comment {
 	vs := summaries[c.ID]
+	content := c.Content
+	if c.HiddenAt != nil || c.DeletedAt != nil {
+		content = ""
+	}
+	var replyToID *string
+	if c.ReplyToID != nil {
+		s := c.ReplyToID.String()
+		replyToID = &s
+	}
 	return Comment{
 		ID:         c.ID.String(),
 		Author:     ToPublicUser(c.Author),
-		Content:    c.Content,
+		Content:    content,
 		Depth:      c.Depth,
+		ReplyToID:  replyToID,
 		LikesCount: c.LikesCount,
 		VoteScore:  vs.Score,
 		MyVote:     vs.MyVote,

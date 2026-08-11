@@ -235,17 +235,17 @@ func (m *mockThreadRepository) Hide(ctx context.Context, id, hiddenBy uuid.UUID,
 
 // mockCommentRepository ручной мок services.CommentRepository
 type mockCommentRepository struct {
-	createFn       func(ctx context.Context, threadID, authorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error)
+	createFn       func(ctx context.Context, threadID, authorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error)
 	findByIDFn     func(ctx context.Context, id uuid.UUID) (*models.Comment, error)
 	updateFn       func(ctx context.Context, id uuid.UUID, content string) (*models.Comment, error)
-	softDeleteFn   func(ctx context.Context, id, threadID uuid.UUID) error
+	softDeleteFn   func(ctx context.Context, id uuid.UUID) error
 	listByThreadFn func(ctx context.Context, threadID uuid.UUID, page, limit int, sort string) ([]models.Comment, int, error)
 	hideFn         func(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error)
 }
 
-func (m *mockCommentRepository) Create(ctx context.Context, threadID, authorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+func (m *mockCommentRepository) Create(ctx context.Context, threadID, authorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 	if m.createFn != nil {
-		return m.createFn(ctx, threadID, authorID, parentID, depth, content)
+		return m.createFn(ctx, threadID, authorID, parentID, replyToID, depth, content)
 	}
 	return nil, models.ErrCommentNotFound
 }
@@ -264,9 +264,9 @@ func (m *mockCommentRepository) Update(ctx context.Context, id uuid.UUID, conten
 	return nil, models.ErrCommentNotFound
 }
 
-func (m *mockCommentRepository) SoftDelete(ctx context.Context, id, threadID uuid.UUID) error {
+func (m *mockCommentRepository) SoftDelete(ctx context.Context, id uuid.UUID) error {
 	if m.softDeleteFn != nil {
-		return m.softDeleteFn(ctx, id, threadID)
+		return m.softDeleteFn(ctx, id)
 	}
 	return nil
 }

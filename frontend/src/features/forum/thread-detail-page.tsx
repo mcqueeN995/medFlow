@@ -207,12 +207,11 @@ export function ThreadDetailPage() {
   }
 
   function deleteComment(commentId: string) {
+    // comments_count не трогаем: комментарий остаётся в дереве плашкой
+    // "пользователь удалил свой комментарий", слот никуда не девается.
     if (!window.confirm('Удалить комментарий?')) return
     deleteCommentsId(commentId)
-      .then(() => {
-        loadComments()
-        setThread((t) => (t ? { ...t, comments_count: Math.max(0, (t.comments_count ?? 0) - 1) } : t))
-      })
+      .then(() => loadComments())
       .catch(() => toast.error('Не удалось удалить комментарий'))
   }
 
@@ -308,7 +307,6 @@ export function ThreadDetailPage() {
       await deleteAdminCommentsId(commentId)
       toast.success('Комментарий удалён')
       loadComments()
-      setThread((t) => (t ? { ...t, comments_count: Math.max(0, (t.comments_count ?? 0) - 1) } : t))
     } catch {
       toast.error('Не удалось удалить комментарий')
     }
@@ -517,6 +515,9 @@ export function ThreadDetailPage() {
                     isAdmin={isAdmin}
                     onHide={hideComment}
                     onAdminDelete={adminDeleteComment}
+                    replyToAuthorNickname={
+                      r.reply_to_id ? c.replies?.find((sibling) => sibling.id === r.reply_to_id)?.author?.nickname : undefined
+                    }
                     nested
                   />
                 ))}

@@ -174,9 +174,12 @@ func TestForumService_CreateComment_TopLevel(t *testing.T) {
 		},
 	}
 	commentRepo := &mockCommentRepository{
-		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 			if parentID != nil {
 				t.Errorf("parentID = %v, want nil for a top-level comment", *parentID)
+			}
+			if replyToID != nil {
+				t.Errorf("replyToID = %v, want nil for a top-level comment", *replyToID)
 			}
 			if depth != 0 {
 				t.Errorf("depth = %d, want 0", depth)
@@ -207,9 +210,12 @@ func TestForumService_CreateComment_ReplyToTopLevel_BecomesDepth1(t *testing.T) 
 		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
 			return &models.Comment{ID: parentID, ThreadID: threadID, Depth: 0, ParentID: nil}, nil
 		},
-		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, gotParentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, gotParentID, gotReplyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 			if gotParentID == nil || *gotParentID != parentID {
 				t.Errorf("parentID = %v, want %v", gotParentID, parentID)
+			}
+			if gotReplyToID != nil {
+				t.Errorf("replyToID = %v, want nil (ответ на корневой комментарий однозначен и так)", *gotReplyToID)
 			}
 			if depth != 1 {
 				t.Errorf("depth = %d, want 1", depth)
@@ -242,14 +248,17 @@ func TestForumService_CreateComment_ReplyToReply_FlattensToGrandparent(t *testin
 			// reply уже сам depth=1, его родитель - grandparent (depth=0)
 			return &models.Comment{ID: replyID, ThreadID: threadID, Depth: 1, ParentID: &grandparentID}, nil
 		},
-		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, gotParentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, gotParentID, gotReplyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 			if gotParentID == nil || *gotParentID != grandparentID {
 				t.Errorf("parentID = %v, want grandparent %v (flattened)", gotParentID, grandparentID)
+			}
+			if gotReplyToID == nil || *gotReplyToID != replyID {
+				t.Errorf("replyToID = %v, want the actual reply %v (кому реально отвечали, не потеряно при схлопывании)", gotReplyToID, replyID)
 			}
 			if depth != 1 {
 				t.Errorf("depth = %d, want 1 (tree capped at 2 levels)", depth)
 			}
-			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, ParentID: gotParentID, Depth: depth, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
+			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, ParentID: gotParentID, ReplyToID: gotReplyToID, Depth: depth, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
 		},
 	}
 	svc := setupTestForumService(threadRepo, commentRepo, nil, nil)
@@ -295,7 +304,7 @@ func TestForumService_CreateComment_TopLevel_NotifiesThreadAuthor(t *testing.T) 
 		},
 	}
 	commentRepo := &mockCommentRepository{
-		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
 		},
 	}
@@ -326,7 +335,7 @@ func TestForumService_CreateComment_Reply_NotifiesParentAuthorNotSelf(t *testing
 		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
 			return &models.Comment{ID: parentID, ThreadID: threadID, Depth: 0, Author: models.PublicUser{ID: authorID}}, nil
 		},
-		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID *uuid.UUID, depth int, content string) (*models.Comment, error) {
+		createFn: func(ctx context.Context, gotThreadID, gotAuthorID uuid.UUID, parentID, replyToID *uuid.UUID, depth int, content string) (*models.Comment, error) {
 			return &models.Comment{ID: uuid.New(), ThreadID: gotThreadID, ParentID: parentID, Depth: depth, Author: models.PublicUser{ID: gotAuthorID}, Content: content}, nil
 		},
 	}
@@ -356,6 +365,49 @@ func TestForumService_UpdateComment_ForbiddenForNonAuthor(t *testing.T) {
 	_, err := svc.UpdateComment(context.Background(), commentID, uuid.New(), "новый текст")
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("UpdateComment() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestForumService_DeleteComment_ForbiddenForNonAuthor(t *testing.T) {
+	commentID := uuid.New()
+	authorID := uuid.New()
+
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return &models.Comment{ID: commentID, Author: models.PublicUser{ID: authorID}}, nil
+		},
+	}
+	svc := setupTestForumService(nil, commentRepo, nil, nil)
+
+	err := svc.DeleteComment(context.Background(), commentID, uuid.New())
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("DeleteComment() error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestForumService_DeleteComment_Success_CallsSoftDeleteWithoutThreadID(t *testing.T) {
+	commentID := uuid.New()
+	authorID := uuid.New()
+	var gotID uuid.UUID
+	softDeleteCalled := false
+
+	commentRepo := &mockCommentRepository{
+		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+			return &models.Comment{ID: commentID, Author: models.PublicUser{ID: authorID}}, nil
+		},
+		softDeleteFn: func(ctx context.Context, id uuid.UUID) error {
+			softDeleteCalled = true
+			gotID = id
+			return nil
+		},
+	}
+	svc := setupTestForumService(nil, commentRepo, nil, nil)
+
+	if err := svc.DeleteComment(context.Background(), commentID, authorID); err != nil {
+		t.Fatalf("DeleteComment() error = %v", err)
+	}
+	if !softDeleteCalled || gotID != commentID {
+		t.Errorf("SoftDelete() called = %v with id = %v, want true with %v", softDeleteCalled, gotID, commentID)
 	}
 }
 
@@ -583,14 +635,21 @@ func TestForumService_AdminHideComment_WritesAuditLog(t *testing.T) {
 	}
 }
 
+// TestForumService_AdminDeleteComment_BypassesOwnership - AdminDeleteComment
+// не проверяет авторство (админ может удалить чужой комментарий), и с точки
+// зрения хранения идёт через Hide (не SoftDelete) - см. doc-комментарий на
+// AdminDeleteComment: для читателя это та же "удалено модератором" плашка,
+// что и обычный Hide, просто отдельное аудит-действие.
 func TestForumService_AdminDeleteComment_BypassesOwnership(t *testing.T) {
 	actorID, commentID, threadID := uuid.New(), uuid.New(), uuid.New()
-	softDeleteCalled := false
+	hideCalled := false
+	var gotHiddenBy uuid.UUID
 	commentRepo := &mockCommentRepository{
-		findByIDFn: func(ctx context.Context, id uuid.UUID) (*models.Comment, error) {
+		hideFn: func(ctx context.Context, id, hiddenBy uuid.UUID, reason string) (*models.Comment, error) {
+			hideCalled = true
+			gotHiddenBy = hiddenBy
 			return &models.Comment{ID: id, ThreadID: threadID, Author: models.PublicUser{ID: uuid.New()}}, nil
 		},
-		softDeleteFn: func(ctx context.Context, id, gotThreadID uuid.UUID) error { softDeleteCalled = true; return nil },
 	}
 	var auditEntry *models.AuditLog
 	auditRepo := &mockAuditLogRepository{
@@ -601,8 +660,11 @@ func TestForumService_AdminDeleteComment_BypassesOwnership(t *testing.T) {
 	if err := svc.AdminDeleteComment(context.Background(), actorID, commentID); err != nil {
 		t.Fatalf("AdminDeleteComment() error = %v", err)
 	}
-	if !softDeleteCalled {
-		t.Error("expected SoftDelete to be called even though actor is not the comment author")
+	if !hideCalled {
+		t.Error("expected Hide to be called even though actor is not the comment author")
+	}
+	if gotHiddenBy != actorID {
+		t.Errorf("Hide() called with hiddenBy = %v, want actorID %v", gotHiddenBy, actorID)
 	}
 	if auditEntry == nil || auditEntry.Action != models.AuditCommentDelete {
 		t.Fatalf("audit log entry = %+v, want AuditCommentDelete", auditEntry)

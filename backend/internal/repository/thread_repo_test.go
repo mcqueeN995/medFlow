@@ -244,6 +244,26 @@ func TestThreadRepo_List_FiltersByTagAndAuthor(t *testing.T) {
 	}
 }
 
+func TestThreadRepo_List_FiltersByQ_CaseInsensitiveSubstring(t *testing.T) {
+	pool := setupTestDB(t)
+	repo := NewThreadRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	suffix := uuid.NewString()[:8]
+
+	matching := createTestThread(t, pool, repo, author.ID, "Kак сдать Анатомию "+suffix, nil)
+	createTestThread(t, pool, repo, author.ID, "Продам стетоскоп "+suffix, nil)
+
+	q := "анатом"
+	threads, total, err := repo.List(ctx, models.ThreadListFilter{Q: &q, Page: 1, Limit: 20})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if total != 1 || len(threads) != 1 || threads[0].ID != matching.ID {
+		t.Fatalf("List(q=%q) = %v (total=%d), want only %v (регистронезависимый поиск по подстроке)", q, threads, total, matching.ID)
+	}
+}
+
 func TestThreadRepo_List_SortPopular(t *testing.T) {
 	pool := setupTestDB(t)
 	repo := NewThreadRepo(pool)

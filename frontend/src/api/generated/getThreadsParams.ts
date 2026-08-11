@@ -21,6 +21,10 @@ import type { ThreadTag } from './threadTag';
 export type GetThreadsParams = {
 tag?: ThreadTag;
 author_id?: string;
+/**
+ * Поиск по заголовку/содержимому треда (регистронезависимая подстрока)
+ */
+q?: string;
 sort?: GetThreadsSort;
 page?: number;
 limit?: number;

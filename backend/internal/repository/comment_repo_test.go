@@ -28,7 +28,7 @@ func TestCommentRepo_Create_IncrementsThreadCommentsCount(t *testing.T) {
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread with comments", nil)
 
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "первый комментарий")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "первый комментарий")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -50,7 +50,13 @@ func TestCommentRepo_Create_IncrementsThreadCommentsCount(t *testing.T) {
 	}
 }
 
-func TestCommentRepo_SoftDelete_DecrementsThreadCommentsCount(t *testing.T) {
+// TestCommentRepo_SoftDelete_KeepsSlotInThreadAndStillListed - удалённый
+// комментарий остаётся строкой (плашка-заглушка на фронтенде вместо полного
+// исчезновения вместе с ответами), поэтому comments_count НЕ уменьшается и
+// ListByThread продолжает его отдавать. FindByID при этом больше не находит
+// его - используется для операций над "живым" комментарием (редактирование,
+// поиск родителя при ответе), а не для отображения дерева.
+func TestCommentRepo_SoftDelete_KeepsSlotInThreadAndStillListed(t *testing.T) {
 	pool := setupTestDB(t)
 	threadRepo := NewThreadRepo(pool)
 	commentRepo := NewCommentRepo(pool)
@@ -58,13 +64,13 @@ func TestCommentRepo_SoftDelete_DecrementsThreadCommentsCount(t *testing.T) {
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
 
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "будет удалён")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "будет удалён")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cleanupComment(t, pool, comment.ID)
 
-	if err := commentRepo.SoftDelete(ctx, comment.ID, thread.ID); err != nil {
+	if err := commentRepo.SoftDelete(ctx, comment.ID); err != nil {
 		t.Fatalf("SoftDelete() error = %v", err)
 	}
 
@@ -76,8 +82,19 @@ func TestCommentRepo_SoftDelete_DecrementsThreadCommentsCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindByID() error = %v", err)
 	}
-	if found.CommentsCount != 0 {
-		t.Errorf("thread.CommentsCount = %d, want 0", found.CommentsCount)
+	if found.CommentsCount != 1 {
+		t.Errorf("thread.CommentsCount = %d, want 1 (слот остаётся занят удалённым комментарием)", found.CommentsCount)
+	}
+
+	comments, total, err := commentRepo.ListByThread(ctx, thread.ID, 1, 50, "new")
+	if err != nil {
+		t.Fatalf("ListByThread() error = %v", err)
+	}
+	if total != 1 || len(comments) != 1 || comments[0].ID != comment.ID {
+		t.Fatalf("ListByThread() = %v (total=%d), want удалённый комментарий всё ещё в выдаче", comments, total)
+	}
+	if comments[0].DeletedAt == nil {
+		t.Error("DeletedAt = nil, want set")
 	}
 }
 
@@ -88,7 +105,7 @@ func TestCommentRepo_Update(t *testing.T) {
 	ctx := context.Background()
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "old content")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "old content")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
@@ -103,6 +120,92 @@ func TestCommentRepo_Update(t *testing.T) {
 	}
 }
 
+// TestCommentRepo_ListByThread_DeletedTopLevel_RepliesStillShown - до фикса
+// ListByThread исключал удалённые комментарии из выборки верхнего уровня, а
+// значит их ответы (которые ищутся по topIDs) вообще не запрашивались -
+// целая ветка пропадала. Теперь удалённый комментарий остаётся плашкой, и
+// его ответы продолжают отображаться под ней.
+func TestCommentRepo_ListByThread_DeletedTopLevel_RepliesStillShown(t *testing.T) {
+	pool := setupTestDB(t)
+	threadRepo := NewThreadRepo(pool)
+	commentRepo := NewCommentRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
+
+	top, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "будет удалён")
+	if err != nil {
+		t.Fatalf("Create() [top] error = %v", err)
+	}
+	cleanupComment(t, pool, top.ID)
+
+	reply, err := commentRepo.Create(ctx, thread.ID, author.ID, &top.ID, nil, 1, "ответ на удалённый")
+	if err != nil {
+		t.Fatalf("Create() [reply] error = %v", err)
+	}
+	cleanupComment(t, pool, reply.ID)
+
+	if err := commentRepo.SoftDelete(ctx, top.ID); err != nil {
+		t.Fatalf("SoftDelete() error = %v", err)
+	}
+
+	comments, total, err := commentRepo.ListByThread(ctx, thread.ID, 1, 50, "new")
+	if err != nil {
+		t.Fatalf("ListByThread() error = %v", err)
+	}
+	if total != 1 || len(comments) != 1 {
+		t.Fatalf("ListByThread() = %v (total=%d), want the deleted top-level comment still present", comments, total)
+	}
+	if comments[0].DeletedAt == nil {
+		t.Error("top-level DeletedAt = nil, want set")
+	}
+	if len(comments[0].Replies) != 1 || comments[0].Replies[0].ID != reply.ID {
+		t.Fatalf("Replies = %v, want the reply to still be attached under the deleted parent", comments[0].Replies)
+	}
+}
+
+// TestCommentRepo_Create_ReplyToID_RoundTrips - reply_to_id сохраняется и
+// читается обратно, отдельно от parent_id (после схлопывания дерева они
+// могут различаться, см. ForumService.CreateComment).
+func TestCommentRepo_Create_ReplyToID_RoundTrips(t *testing.T) {
+	pool := setupTestDB(t)
+	threadRepo := NewThreadRepo(pool)
+	commentRepo := NewCommentRepo(pool)
+	ctx := context.Background()
+	author := createTestForumUser(t, pool)
+	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
+
+	root, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "root")
+	if err != nil {
+		t.Fatalf("Create() [root] error = %v", err)
+	}
+	cleanupComment(t, pool, root.ID)
+
+	firstReply, err := commentRepo.Create(ctx, thread.ID, author.ID, &root.ID, nil, 1, "first reply")
+	if err != nil {
+		t.Fatalf("Create() [firstReply] error = %v", err)
+	}
+	cleanupComment(t, pool, firstReply.ID)
+
+	// "Ответ на ответ": parent_id схлопнут к root, reply_to_id указывает на firstReply.
+	secondReply, err := commentRepo.Create(ctx, thread.ID, author.ID, &root.ID, &firstReply.ID, 1, "reply to the reply")
+	if err != nil {
+		t.Fatalf("Create() [secondReply] error = %v", err)
+	}
+	cleanupComment(t, pool, secondReply.ID)
+
+	found, err := commentRepo.FindByID(ctx, secondReply.ID)
+	if err != nil {
+		t.Fatalf("FindByID() error = %v", err)
+	}
+	if found.ParentID == nil || *found.ParentID != root.ID {
+		t.Errorf("ParentID = %v, want root %v", found.ParentID, root.ID)
+	}
+	if found.ReplyToID == nil || *found.ReplyToID != firstReply.ID {
+		t.Errorf("ReplyToID = %v, want firstReply %v", found.ReplyToID, firstReply.ID)
+	}
+}
+
 func TestCommentRepo_ListByThread_TopLevelWithReplies(t *testing.T) {
 	pool := setupTestDB(t)
 	threadRepo := NewThreadRepo(pool)
@@ -111,19 +214,19 @@ func TestCommentRepo_ListByThread_TopLevelWithReplies(t *testing.T) {
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
 
-	top1, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "top 1")
+	top1, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "top 1")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cleanupComment(t, pool, top1.ID)
 
-	top2, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "top 2")
+	top2, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "top 2")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
 	cleanupComment(t, pool, top2.ID)
 
-	reply, err := commentRepo.Create(ctx, thread.ID, author.ID, &top1.ID, 1, "reply to top 1")
+	reply, err := commentRepo.Create(ctx, thread.ID, author.ID, &top1.ID, nil, 1, "reply to top 1")
 	if err != nil {
 		t.Fatalf("Create() reply error = %v", err)
 	}
@@ -163,13 +266,13 @@ func TestCommentRepo_ListByThread_SortBest_OrdersByVoteScore(t *testing.T) {
 	voter2 := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
 
-	low, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "low score, posted first")
+	low, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "low score, posted first")
 	if err != nil {
 		t.Fatalf("Create() [low] error = %v", err)
 	}
 	cleanupComment(t, pool, low.ID)
 
-	high, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "high score, posted second")
+	high, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "high score, posted second")
 	if err != nil {
 		t.Fatalf("Create() [high] error = %v", err)
 	}
@@ -213,7 +316,7 @@ func TestCommentRepo_Hide(t *testing.T) {
 	author := createTestForumUser(t, pool)
 	moderator := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread with a bad comment", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "spam comment")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "spam comment")
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}

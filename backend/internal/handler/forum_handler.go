@@ -80,6 +80,7 @@ func (h *ForumHandler) ListThreads(c *gin.Context) {
 	var q struct {
 		Tag      string `form:"tag"`
 		AuthorID string `form:"author_id"`
+		Q        string `form:"q"`
 		Sort     string `form:"sort"`
 		Page     int    `form:"page,default=1"`
 		Limit    int    `form:"limit,default=20"`
@@ -101,6 +102,9 @@ func (h *ForumHandler) ListThreads(c *gin.Context) {
 			return
 		}
 		filter.AuthorID = &authorID
+	}
+	if q.Q != "" {
+		filter.Q = &q.Q
 	}
 
 	pagination, items, err := h.forumService.ListThreads(c.Request.Context(), filter)

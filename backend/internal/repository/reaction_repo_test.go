@@ -124,7 +124,7 @@ func TestReactionRepo_EmojiAndVote_CoexistOnSameComment(t *testing.T) {
 	ctx := context.Background()
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "votable comment")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "votable comment")
 	if err != nil {
 		t.Fatalf("Create() comment error = %v", err)
 	}
@@ -178,7 +178,7 @@ func TestReactionRepo_UpsertVote_ChangeDirection_DoesNotDuplicate(t *testing.T) 
 	ctx := context.Background()
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "votable comment")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "votable comment")
 	if err != nil {
 		t.Fatalf("Create() comment error = %v", err)
 	}
@@ -214,7 +214,7 @@ func TestReactionRepo_VoteSummaries_MultipleVoters(t *testing.T) {
 	voter1 := createTestForumUser(t, pool)
 	voter2 := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "votable comment")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "votable comment")
 	if err != nil {
 		t.Fatalf("Create() comment error = %v", err)
 	}
@@ -251,7 +251,7 @@ func TestReactionRepo_DeleteVote_NotFound(t *testing.T) {
 	ctx := context.Background()
 	author := createTestForumUser(t, pool)
 	thread := createTestThread(t, pool, threadRepo, author.ID, "thread", nil)
-	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, 0, "no vote here")
+	comment, err := commentRepo.Create(ctx, thread.ID, author.ID, nil, nil, 0, "no vote here")
 	if err != nil {
 		t.Fatalf("Create() comment error = %v", err)
 	}

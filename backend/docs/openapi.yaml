@@ -892,6 +892,10 @@ paths:
         - name: author_id
           in: query
           schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          description: "Поиск по заголовку/содержимому треда (регистронезависимая подстрока)"
+          schema: { type: string }
         - name: sort
           in: query
           schema:
@@ -2452,8 +2456,9 @@ components:
       properties:
         id: { type: string, format: uuid }
         author: { $ref: '#/components/schemas/PublicUser' }
-        content: { type: string }
+        content: { type: string, description: "Пустая строка, если комментарий удалён или скрыт - см. hidden_at/deleted_at" }
         depth: { type: integer }
+        reply_to_id: { type: string, format: uuid, nullable: true, description: "Кому реально отвечали, если это не тот же комментарий, что и родитель верхнего уровня (после схлопывания 2-уровневого дерева)" }
         likes_count: { type: integer }
         vote_score: { type: integer, description: "Сумма голосов up(+1)/down(-1)" }
         my_vote: { type: string, enum: [up, down], nullable: true, description: "Направление голоса текущего пользователя, если голосовал" }

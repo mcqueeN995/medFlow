@@ -60,7 +60,7 @@ describe('ForgotPasswordPage', () => {
       </MemoryRouter>,
     )
 
-    await user.click(screen.getByRole('link', { name: 'Забыли пароль?' }))
+    await user.click(screen.getByRole('link', { name: 'Восстановить его' }))
     await screen.findByText(/если аккаунт существует/i)
   })
 })

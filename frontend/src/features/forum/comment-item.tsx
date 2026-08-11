@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { EyeOff, Flame, Reply, ShieldX, ThumbsDown, ThumbsUp, Trash2, TriangleAlert } from 'lucide-react'
+import { CornerDownRight, EyeOff, Flame, Reply, ShieldX, ThumbsDown, ThumbsUp, Trash2, TriangleAlert } from 'lucide-react'
 import type { Comment } from '@/api/generated'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -20,6 +20,11 @@ interface CommentItemProps {
   onHide?: (id: string) => void
   onAdminDelete?: (id: string) => void
   nested?: boolean
+  // replyToAuthorNickname - имя автора, которому реально отвечали, если это
+  // не тот же человек, что и автор родительского (верхнеуровневого)
+  // комментария - иначе на вложенных ответах непонятно, кому именно
+  // адресован ответ (см. models.Comment.ReplyToID на бэкенде).
+  replyToAuthorNickname?: string
 }
 
 export function CommentItem({
@@ -36,11 +41,13 @@ export function CommentItem({
   onHide,
   onAdminDelete,
   nested,
+  replyToAuthorNickname,
 }: CommentItemProps) {
   const [replying, setReplying] = useState(false)
   const [replyText, setReplyText] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isOwner = comment.author?.id === currentUserId
+  const isRemoved = Boolean(comment.deleted_at || comment.hidden_at)
 
   async function submitReply() {
     if (!replyText.trim()) return
@@ -56,11 +63,22 @@ export function CommentItem({
 
   return (
     <div className={cn('flex flex-col gap-1.5', nested && 'ml-6 border-l border-border pl-4')}>
+      {replyToAuthorNickname && (
+        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+          <CornerDownRight className="size-3" /> Ответ пользователю {replyToAuthorNickname}
+        </div>
+      )}
       <div className="flex items-center gap-2 text-xs">
         <span className="font-medium text-foreground">{comment.author?.nickname ?? 'Аноним'}</span>
         <span className="text-muted-foreground">{timeAgo(comment.created_at)}</span>
       </div>
-      <p className="text-sm text-foreground">{comment.content}</p>
+      {isRemoved ? (
+        <p className="text-sm italic text-muted-foreground">
+          {comment.deleted_at ? 'Пользователь удалил свой комментарий' : 'Комментарий скрыт модератором'}
+        </p>
+      ) : (
+        <p className="text-sm text-foreground">{comment.content}</p>
+      )}
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <button

@@ -76,10 +76,6 @@ export function LoginPage() {
           </button>
         </div>
 
-        <Link to="/forgot-password" className="text-right text-sm text-accent underline underline-offset-2">
-          Забыли пароль?
-        </Link>
-
         <label className="flex items-start gap-2 text-sm text-muted-foreground">
           <Checkbox
             checked={agreed}
@@ -112,6 +108,13 @@ export function LoginPage() {
           У вас нет аккаунта?{' '}
           <Link to="/register" className="font-medium text-accent underline underline-offset-2">
             зарегистрировать
+          </Link>
+        </p>
+
+        <p className="text-center text-sm text-muted-foreground">
+          Забыли пароль?{' '}
+          <Link to="/forgot-password" className="font-medium text-accent underline underline-offset-2">
+            Восстановить его
           </Link>
         </p>
       </form>
